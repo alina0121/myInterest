@@ -5,6 +5,8 @@ import { get, post, patch, del, put } from '@/utils/request'
 export const apiLogin = (account, password) =>
   post('/api/auth/login', { account, password }, { auth: false })
 export const apiRegister = (payload) => post('/api/auth/register', payload, { auth: false })
+export const apiWxLogin = (code, nickname, avatar) =>
+  post('/api/auth/wx-login', { code, nickname, avatar }, { auth: false })
 export const apiMe = () => get('/api/auth/me')
 
 // ---------- 持仓 ----------

@@ -1,14 +1,17 @@
-"""认证接口：注册/登录/刷新/当前用户/退出（docs/04 §一）。"""
+"""认证接口：注册/登录/刷新/当前用户/退出/微信登录（docs/04 §一）。"""
+import secrets
 import threading
 import time
 from collections import defaultdict, deque
 
+import httpx
 from fastapi import APIRouter, Depends, Request
 from sqlmodel import Session, or_, select
 
+from ..config import WX_APPID, WX_MOCK, WX_SECRET
 from ..database import get_session
 from ..models import User, UserSetting
-from ..schemas import LoginIn, RefreshIn, RegisterIn
+from ..schemas import LoginIn, RefreshIn, RegisterIn, WxLoginIn
 from ..utils.errors import AppError, Codes, ok
 from ..utils.security import (create_refresh_token, decode_token, hash_password,
                               token_pair, verify_password)
@@ -91,6 +94,72 @@ def refresh(body: RefreshIn, request: Request, session: Session = Depends(get_se
 @router.get("/me")
 def me(user: User = Depends(get_current_user)):
     return ok(_user_out(user))
+
+
+@router.post("/wx-login")
+def wx_login(body: WxLoginIn, request: Request,
+             session: Session = Depends(get_session)):
+    """微信小程序登录（docs/04 §1.5）。
+
+    code → 微信 code2session 换 openid → 已绑定则登录；未绑定则创建用户。
+    未配置 AppID/Secret 或 XI_WX_MOCK=1 时进入 mock 模式（用 code 当 openid）。
+    """
+    _rate_limit(request)
+    openid = _wx_code2openid(body.code)
+    if not openid:
+        raise AppError(Codes.VALIDATION, "微信登录失败，请重试", status=400)
+
+    user = session.exec(select(User).where(User.wx_openid == openid)).first()
+    is_new = False
+    if user is None:
+        # 未绑定 → 创建用户（随机密码，username=wx_{openid前8位}）
+        username = "wx_" + openid[:8]
+        while session.exec(select(User).where(User.username == username)).first():
+            username = "wx_" + openid[:6] + secrets.token_hex(2)
+        user = User(
+            username=username, wx_openid=openid,
+            password_hash=hash_password(secrets.token_urlsafe(16)),
+            nickname=body.nickname or f"微信用户{openid[-4:]}",
+            avatar=body.avatar,
+        )
+        session.add(user)
+        session.flush()
+        session.add(UserSetting(user_id=user.id))
+        is_new = True
+    else:
+        # 已绑定 → 更新昵称/头像（若有传）
+        if body.nickname:
+            user.nickname = body.nickname
+        if body.avatar:
+            user.avatar = body.avatar
+
+    if user.status == "banned":
+        raise AppError(Codes.FORBIDDEN, "账号已封禁，请联系管理员", status=403)
+    user.last_login_at = now_str()
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return ok({"user": _user_out(user), **token_pair(user.id), "is_new_user": is_new})
+
+
+def _wx_code2openid(code: str) -> str | None:
+    """调用微信 code2session 接口换取 openid；mock 模式直接返回 code。"""
+    if WX_MOCK:
+        return code
+    try:
+        resp = httpx.get(
+            "https://api.weixin.qq.com/sns/jscode2session",
+            params={"appid": WX_APPID, "secret": WX_SECRET,
+                    "js_code": code, "grant_type": "authorization_code"},
+            timeout=8.0,
+        )
+        data = resp.json()
+        if data.get("openid"):
+            return data["openid"]
+        # errcode: 40029=code无效, 40163=code已被使用, 45011=频率限制
+        return None
+    except Exception:
+        return None
 
 
 @router.post("/logout")

@@ -28,6 +28,12 @@ class RefreshIn(BaseModel):
     refresh_token: str
 
 
+class WxLoginIn(BaseModel):
+    code: str = Field(min_length=1)
+    nickname: Optional[str] = None
+    avatar: Optional[str] = None
+
+
 # ---------- holdings ----------
 class FirstLotIn(BaseModel):
     trade_date: Date

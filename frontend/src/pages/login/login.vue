@@ -33,6 +33,15 @@
         <button class="btn-primary submit" :loading="loading" @click="submit">
           {{ mode === 'login' ? '登 录' : '注 册' }}
         </button>
+
+        <!-- 微信小程序端：一键登录（docs/05 §3 微信登录，必须用户点击触发） -->
+        <!-- #ifdef MP-WEIXIN -->
+        <view class="divider"><text class="divider-text">其他登录方式</text></view>
+        <button class="btn-wx" :loading="wxLoading" @click="onWxLogin">
+          <text class="wx-icon">✦</text> 微信一键登录
+        </button>
+        <!-- #endif -->
+
         <view v-if="mode === 'login'" class="hint">还没有账号？<text class="link" @click="mode = 'register'">立即注册</text></view>
         <view v-else class="hint">已有账号？<text class="link" @click="mode = 'login'">返回登录</text></view>
       </view>
@@ -42,11 +51,12 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import { apiLogin, apiRegister } from '@/api'
+import { apiLogin, apiRegister, apiWxLogin } from '@/api'
 import { setAuth } from '@/store/user'
 
 const mode = ref('login')
 const loading = ref(false)
+const wxLoading = ref(false)
 const form = reactive({ account: '', email: '', password: '', nickname: '' })
 
 async function submit() {
@@ -76,6 +86,41 @@ async function submit() {
     // 错误 toast 已由 request 统一处理
   } finally {
     loading.value = false
+  }
+}
+
+// ---------- 微信小程序一键登录 ----------
+async function onWxLogin() {
+  if (wxLoading.value) return
+  wxLoading.value = true
+  try {
+    // 1. wx.login 拿临时 code
+    const loginRes = await new Promise((resolve, reject) => {
+      uni.login({ provider: 'weixin', success: resolve, fail: reject })
+    })
+    if (!loginRes.code) throw new Error('微信登录失败：未获取到 code')
+
+    // 2. 尝试获取昵称头像（用户拒绝也可登录，只是无资料）
+    let nickname = null, avatar = null
+    try {
+      const profile = await new Promise((resolve, reject) => {
+        uni.getUserProfile({ desc: '用于完善会员资料', success: resolve, fail: reject })
+      })
+      nickname = profile.userInfo?.nickName || null
+      avatar = profile.userInfo?.avatarUrl || null
+    } catch (e) {
+      // 用户拒绝授权头像昵称，仍可登录
+    }
+
+    // 3. 调后端 wx-login 换 token
+    const data = await apiWxLogin(loginRes.code, nickname, avatar)
+    setAuth(data.access_token, data.user)
+    uni.showToast({ title: data.is_new_user ? '登录成功' : '欢迎回来', icon: 'success' })
+    setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 400)
+  } catch (e) {
+    // 错误 toast 已由 request 统一处理
+  } finally {
+    wxLoading.value = false
   }
 }
 </script>
@@ -108,6 +153,22 @@ async function submit() {
 .f-label { display: block; font-size: 24rpx; color: #94a3b8; margin-bottom: 12rpx; }
 .f-input { font-size: 30rpx; height: 44rpx; }
 .submit { margin-top: 50rpx; }
+.divider {
+  display: flex; align-items: center; margin: 40rpx 0 24rpx;
+}
+.divider::before, .divider::after {
+  content: ''; flex: 1; height: 1rpx; background: #e2e8f0;
+}
+.divider-text {
+  padding: 0 20rpx; font-size: 24rpx; color: #94a3b8;
+}
+.btn-wx {
+  background: #07c160; color: #fff; border-radius: 44rpx;
+  font-size: 30rpx; height: 88rpx; line-height: 88rpx; text-align: center;
+  border: none; display: flex; align-items: center; justify-content: center;
+}
+.btn-wx::after { border: none; }
+.wx-icon { margin-right: 10rpx; font-size: 32rpx; }
 .hint { text-align: center; margin-top: 28rpx; font-size: 26rpx; color: #94a3b8; }
 .link { color: #1668dc; }
 </style>
