@@ -1,0 +1,38 @@
+/* 全局样式（对齐 prototype.html 设计稿） */
+:root {
+  --primary: #1e3a8a;
+  --primary-light: #3b82f6;
+  --success: #059669;
+  --bg: #f8fafc;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  margin: 0;
+  color: #1e293b;
+}
+
+.card {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  padding: 20px;
+}
+
+.stat-card { transition: transform 0.2s; }
+.stat-card:hover { transform: translateY(-2px); }
+
+.text-emerald { color: #059669; }
+.text-amber { color: #d97706; }
+.text-muted { color: #94a3b8; font-size: 12px; }
+
+.page-content { padding: 24px 32px; }
+
+/* 市场徽章配色 */
+.badge-a { background: #fef2f2; color: #dc2626; }
+.badge-us { background: #eff6ff; color: #2563eb; }
+.badge-hk { background: #ecfdf5; color: #059669; }
+.badge-fund { background: #fffbeb; color: #d97706; }
