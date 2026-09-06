@@ -1,0 +1,1578 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>息计 - 投资分红记录 · 原型设计</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+<style>
+  :root {
+    --primary: #1e3a8a;
+    --primary-light: #3b82f6;
+    --success: #059669;
+    --bg: #f8fafc;
+  }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); }
+  .nav-item.active { background: #1e3a8a; color: white; }
+  .nav-item.active .nav-icon { color: white; }
+  .admin-nav.active { background: rgba(255,255,255,0.12); color: white; font-weight: 500; }
+  .card { background: white; border-radius: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+  .stat-card { transition: transform .2s; }
+  .stat-card:hover { transform: translateY(-2px); }
+  .page { display: none; }
+  .page.active { display: block; }
+  .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 12px; font-weight: 500; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; padding: 12px; font-size: 13px; color: #64748b; font-weight: 500; border-bottom: 1px solid #e2e8f0; background: #f8fafc; }
+  td { padding: 12px; font-size: 14px; border-bottom: 1px solid #f1f5f9; }
+  tr:hover td { background: #f8fafc; }
+  .modal { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 50; align-items: center; justify-content: center; }
+  .modal.show { display: flex; }
+  .cal-day { min-height: 90px; border: 1px solid #e2e8f0; padding: 6px; border-radius: 6px; }
+  .cal-day.has-div { background: #ecfdf5; border-color: #10b981; }
+  .cal-day.upcoming { background: #fef3c7; border-color: #f59e0b; }
+  input, select { outline: none; }
+  input:focus, select:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,0.1); }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- 登录/注册（多用户入口，默认显示） -->
+<div id="loginScreen" class="fixed inset-0 z-40 bg-slate-100 flex items-center justify-center">
+  <div class="card p-8 w-96">
+    <div class="flex items-center gap-3 mb-6 justify-center">
+      <div class="w-10 h-10 rounded-lg bg-blue-900 flex items-center justify-center text-white font-bold text-xl">息</div>
+      <div>
+        <div class="font-bold text-slate-800 text-lg leading-tight">息计</div>
+        <div class="text-xs text-slate-400">多用户分红记录助手</div>
+      </div>
+    </div>
+    <div class="flex border-b border-slate-200 mb-5 text-sm">
+      <button id="tabLogin" class="flex-1 pb-2 font-medium text-blue-900 border-b-2 border-blue-900">登录</button>
+      <button id="tabRegister" class="flex-1 pb-2 text-slate-400 border-b-2 border-transparent">注册</button>
+    </div>
+    <div class="space-y-3">
+      <input id="loginUser" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="用户名 / 邮箱" value="demo@xi.com" />
+      <input id="loginPwd" type="password" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="密码" value="123456" />
+      <div id="regExtra" class="hidden">
+        <input class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm mb-3" placeholder="确认密码" />
+        <input class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" placeholder="昵称（选填）" />
+      </div>
+      <div class="flex items-center justify-between text-xs">
+        <label class="flex items-center gap-1 text-slate-500"><input type="checkbox" checked /> 记住我</label>
+        <a class="text-blue-600 cursor-pointer">忘记密码？</a>
+      </div>
+      <button id="btnLogin" class="w-full py-2.5 bg-blue-900 text-white rounded-lg text-sm hover:bg-blue-800">登 录</button>
+      <div class="flex items-center gap-2 text-xs text-slate-300 py-1">
+        <span class="flex-1 border-t border-slate-200"></span>其他方式登录<span class="flex-1 border-t border-slate-200"></span>
+      </div>
+      <button class="w-full py-2.5 border border-slate-200 rounded-lg text-sm hover:bg-slate-50">💬 微信一键登录（小程序端）</button>
+      <p class="text-xs text-slate-400 text-center">数据按用户隔离 · 仅本人可见</p>
+    </div>
+  </div>
+</div>
+
+<div class="flex min-h-screen">
+  <!-- 侧边导航 -->
+  <aside class="w-56 bg-white border-r border-slate-200 flex flex-col">
+    <div class="p-5 border-b border-slate-200">
+      <div class="flex items-center gap-2">
+        <div class="w-9 h-9 rounded-lg bg-blue-900 flex items-center justify-center text-white font-bold text-lg">息</div>
+        <div>
+          <div class="font-bold text-slate-800">息计</div>
+          <div class="text-xs text-slate-400">分红记录助手</div>
+        </div>
+      </div>
+    </div>
+    <nav class="flex-1 p-3 space-y-1">
+      <a class="nav-item active flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-slate-600 hover:bg-slate-100" data-page="dashboard">
+        <span class="nav-icon text-lg">📊</span><span>总览看板</span>
+      </a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-slate-600 hover:bg-slate-100" data-page="holdings">
+        <span class="nav-icon text-lg">📈</span><span>持仓管理</span>
+      </a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-slate-600 hover:bg-slate-100" data-page="dividends">
+        <span class="nav-icon text-lg">💰</span><span>分红记录</span>
+      </a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-slate-600 hover:bg-slate-100" data-page="calendar">
+        <span class="nav-icon text-lg">📅</span><span>分红日历</span>
+      </a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-slate-600 hover:bg-slate-100" data-page="stats">
+        <span class="nav-icon text-lg">📉</span><span>统计分析</span>
+      </a>
+      <a class="nav-item flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer text-slate-600 hover:bg-slate-100" data-page="settings">
+        <span class="nav-icon text-lg">⚙️</span><span>设置</span>
+      </a>
+    </nav>
+    <div class="p-4 border-t border-slate-200 text-xs text-slate-400">
+      v1.1.0 · 原型设计稿 · 支持多批次持仓
+    </div>
+  </aside>
+
+  <!-- 主内容区 -->
+  <main class="flex-1 overflow-auto">
+    <!-- 顶部栏 -->
+    <header class="bg-white border-b border-slate-200 px-8 py-4 flex items-center justify-between sticky top-0 z-10">
+      <div>
+        <h1 id="pageTitle" class="text-xl font-bold text-slate-800">总览看板</h1>
+        <p class="text-sm text-slate-400">记录每一笔分红，见证复利的力量</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button class="px-4 py-2 text-sm bg-blue-900 text-white rounded-lg hover:bg-blue-800">+ 添加分红</button>
+        <div class="flex items-center gap-2 cursor-pointer group" onclick="logout()" title="点击退出登录">
+          <div id="headerAvatar" class="w-9 h-9 rounded-full bg-blue-100 text-blue-900 flex items-center justify-center font-semibold">D</div>
+          <div class="text-left">
+            <div id="headerUser" class="text-sm font-medium text-slate-700 leading-tight">demo@xi.com</div>
+            <div class="text-xs text-slate-400 leading-tight group-hover:text-red-500">退出登录 →</div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <div class="p-8">
+
+      <!-- ============ 总览看板 ============ -->
+      <section id="page-dashboard" class="page active">
+        <!-- 统计卡片 -->
+        <div class="grid grid-cols-4 gap-5 mb-6">
+          <div class="stat-card card p-5">
+            <div class="text-sm text-slate-500">2026 年度分红</div>
+            <div class="text-3xl font-bold text-slate-800 mt-2">¥ 28,650.00</div>
+            <div class="text-xs text-emerald-600 mt-2">↑ 12.5% 较去年</div>
+          </div>
+          <div class="stat-card card p-5">
+            <div class="text-sm text-slate-500">本月到账</div>
+            <div class="text-3xl font-bold text-slate-800 mt-2">¥ 3,420.00</div>
+            <div class="text-xs text-slate-400 mt-2">3 笔分红</div>
+          </div>
+          <div class="stat-card card p-5">
+            <div class="text-sm text-slate-500">累计分红总额</div>
+            <div class="text-3xl font-bold text-slate-800 mt-2">¥ 86,420.00</div>
+            <div class="text-xs text-slate-400 mt-2">自 2020 年起</div>
+          </div>
+          <div class="stat-card card p-5">
+            <div class="text-sm text-slate-500">持仓数量</div>
+            <div class="text-3xl font-bold text-slate-800 mt-2">24 只</div>
+            <div class="text-xs text-slate-400 mt-2">A股 11 · 美股 6 · 基金 6 · 港股 1</div>
+          </div>
+        </div>
+
+        <!-- 未来12个月分红预测 + 派息节奏（参考 DivTracker） -->
+        <div class="grid grid-cols-3 gap-5 mb-6">
+          <div class="card p-5 col-span-2">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="font-semibold text-slate-800">未来 12 个月分红预测</h3>
+              <span class="text-xs text-slate-400">已公告预案 + 近 12 个月派息推算</span>
+            </div>
+            <div id="chartForecast" style="height: 260px;"></div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">派息节奏</h3>
+            <div class="space-y-2 text-sm">
+              <div class="flex justify-between"><span class="text-slate-500">季派（Apple/MSFT…）</span><span class="font-medium">6 只</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">年派（大行/茅台…）</span><span class="font-medium">9 只</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">半年派</span><span class="font-medium">5 只</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">月派（REITs）</span><span class="font-medium">2 只</span></div>
+              <div class="flex justify-between"><span class="text-slate-500">不定期（基金）</span><span class="font-medium">2 只</span></div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-slate-100">
+              <div class="text-xs text-slate-400">TTM 分红（近 12 个月已到账）</div>
+              <div class="text-2xl font-bold text-emerald-600 mt-1">¥ 30,842</div>
+              <div class="text-xs text-slate-400 mt-1">折合月均 ¥ 2,570 · 下月预告 ¥ 1,820</div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-3 gap-5 mb-6">
+          <!-- 分红趋势图 -->
+          <div class="card p-5 col-span-2">
+            <div class="flex justify-between items-center mb-4">
+              <h3 class="font-semibold text-slate-800">分红趋势（近 12 个月）</h3>
+              <select class="text-sm border border-slate-200 rounded px-2 py-1">
+                <option>近 12 个月</option><option>本年度</option><option>全部</option>
+              </select>
+            </div>
+            <div id="chartTrend" style="height: 300px;"></div>
+          </div>
+          <!-- 市场占比 -->
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">各市场分红占比</h3>
+            <div id="chartMarket" style="height: 300px;"></div>
+          </div>
+        </div>
+
+        <!-- 最近分红 + 即将到账 -->
+        <div class="grid grid-cols-2 gap-5">
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">最近到账分红</h3>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between py-2 border-b border-slate-100">
+                <div>
+                  <div class="font-medium">贵州茅台 (600519)</div>
+                  <div class="text-xs text-slate-400">2026-08-25 派息</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-semibold text-emerald-600">+¥ 2,580.00</div>
+                  <div class="text-xs text-slate-400">100 股 × 25.80</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between py-2 border-b border-slate-100">
+                <div>
+                  <div class="font-medium">Apple (AAPL)</div>
+                  <div class="text-xs text-slate-400">2026-08-15 派息</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-semibold text-emerald-600">+$ 24.00</div>
+                  <div class="text-xs text-slate-400">50 股 × $0.48</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between py-2">
+                <div>
+                  <div class="font-medium">易方达蓝筹 (005827)</div>
+                  <div class="text-xs text-slate-400">2026-08-10 派息</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-semibold text-emerald-600">+¥ 816.00</div>
+                  <div class="text-xs text-slate-400">10000 份 × 0.0816</div>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">即将到账分红</h3>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between py-2 border-b border-slate-100">
+                <div>
+                  <div class="font-medium">工商银行 (601398)</div>
+                  <div class="text-xs text-amber-600">预计 2026-09-10 到账</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-semibold text-slate-700">约 ¥ 1,260.00</div>
+                  <div class="text-xs text-slate-400">3000 股 × 0.42</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-between py-2">
+                <div>
+                  <div class="font-medium">Microsoft (MSFT)</div>
+                  <div class="text-xs text-amber-600">预计 2026-09-12 到账</div>
+                </div>
+                <div class="text-right">
+                  <div class="font-semibold text-slate-700">约 $ 18.00</div>
+                  <div class="text-xs text-slate-400">30 股 × $0.60</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 持仓管理 ============ -->
+      <section id="page-holdings" class="page">
+        <div class="flex justify-between items-center mb-5">
+          <div class="flex gap-2">
+            <select class="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              <option>全部市场</option><option>A股</option><option>美股</option><option>港股</option><option>基金</option>
+            </select>
+            <input type="text" placeholder="搜索代码或名称..." class="border border-slate-200 rounded-lg px-3 py-2 text-sm w-56" />
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400">💡 点击行查看买入批次与分红归属</span>
+            <button onclick="openModal('modalHolding')" class="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm hover:bg-blue-800">+ 添加持仓</button>
+          </div>
+        </div>
+
+        <div class="card overflow-hidden overflow-x-auto">
+          <table class="whitespace-nowrap">
+            <thead>
+              <tr>
+                <th>市场</th><th>代码</th><th>名称</th><th>持仓数量</th><th>平均成本</th>
+                <th>币种</th><th>批次</th><th>本年分红(税前)</th><th>累计分红</th>
+                <th>股息率(TTM成本)</th><th>派息频率</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="cursor-pointer" onclick="openDetail('h1')">
+                <td><span class="badge bg-red-50 text-red-600">A股</span></td>
+                <td>600519</td><td>贵州茅台</td><td>100 股</td><td>¥ 1,676.00</td>
+                <td>CNY</td><td>2 笔</td><td>¥ 2,580.00</td>
+                <td class="text-emerald-600 font-medium">¥ 11,923.16</td>
+                <td class="text-emerald-600 font-medium">3.60%</td>
+                <td>年派 1 次</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a> · <a class="text-red-500 text-sm cursor-pointer">删除</a></td>
+              </tr>
+              <tr class="cursor-pointer" onclick="openDetail('h2')">
+                <td><span class="badge bg-blue-50 text-blue-600">美股</span></td>
+                <td>AAPL</td><td>Apple</td><td>50 股</td><td>$ 142.30</td>
+                <td>USD</td><td>2 笔</td><td>$ 49.00</td>
+                <td class="text-emerald-600 font-medium">$ 312.00</td>
+                <td class="text-emerald-600 font-medium">0.86%</td>
+                <td>季派 4 次</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a> · <a class="text-red-500 text-sm cursor-pointer">删除</a></td>
+              </tr>
+              <tr class="cursor-pointer" onclick="openDetail('h3')">
+                <td><span class="badge bg-amber-50 text-amber-600">基金</span></td>
+                <td>005827</td><td>易方达蓝筹</td><td>10,000 份</td><td>¥ 2.1460</td>
+                <td>CNY</td><td>2 笔</td><td>¥ 1,316.00</td>
+                <td class="text-emerald-600 font-medium">¥ 3,146.00</td>
+                <td class="text-emerald-600 font-medium">6.13%</td>
+                <td>不定期</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a> · <a class="text-red-500 text-sm cursor-pointer">删除</a></td>
+              </tr>
+              <tr class="cursor-pointer" onclick="openDetail('h4')">
+                <td><span class="badge bg-red-50 text-red-600">A股</span></td>
+                <td>601398</td><td>工商银行</td><td>3,000 股</td><td>¥ 4.85</td>
+                <td>CNY</td><td>2 笔</td><td>¥ 900.00</td>
+                <td class="text-emerald-600 font-medium">¥ 2,518.00</td>
+                <td class="text-emerald-600 font-medium">6.19%</td>
+                <td>年派 1 次</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a> · <a class="text-red-500 text-sm cursor-pointer">删除</a></td>
+              </tr>
+              <tr class="cursor-pointer" onclick="openDetail('h5')">
+                <td><span class="badge bg-blue-50 text-blue-600">美股</span></td>
+                <td>MSFT</td><td>Microsoft</td><td>30 股</td><td>$ 312.00</td>
+                <td>USD</td><td>2 笔</td><td>$ 49.80</td>
+                <td class="text-emerald-600 font-medium">$ 144.00</td>
+                <td class="text-emerald-600 font-medium">1.06%</td>
+                <td>季派 4 次</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a> · <a class="text-red-500 text-sm cursor-pointer">删除</a></td>
+              </tr>
+              <tr class="cursor-pointer" onclick="openDetail('h6')">
+                <td><span class="badge bg-emerald-50 text-emerald-600">港股</span></td>
+                <td>00700</td><td>腾讯控股</td><td>200 股</td><td>HKD 365.00</td>
+                <td>HKD</td><td>2 笔</td><td>HKD 900.00</td>
+                <td class="text-emerald-600 font-medium">HKD 1,920.00</td>
+                <td class="text-emerald-600 font-medium">1.23%</td>
+                <td>年派 1 次</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a> · <a class="text-red-500 text-sm cursor-pointer">删除</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 持仓详情（多批次） ============ -->
+      <section id="page-detail" class="page">
+        <div class="flex items-center gap-2 mb-5 text-sm">
+          <a class="text-blue-600 cursor-pointer" onclick="backToHoldings()">← 返回持仓列表</a>
+          <span class="text-slate-300">/</span>
+          <span id="dCrumb" class="text-slate-500">贵州茅台 (600519)</span>
+        </div>
+
+        <div class="card p-5 mb-5">
+          <div class="flex items-start justify-between flex-wrap gap-3">
+            <div class="flex items-center gap-3">
+              <div id="dIcon" class="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-2xl">🍷</div>
+              <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                  <h2 id="dName" class="text-lg font-bold">贵州茅台</h2>
+                  <span id="dCode" class="text-sm text-slate-400">600519</span>
+                  <span id="dMarket" class="badge bg-red-50 text-red-600">A股</span>
+                  <span id="dFreq" class="badge bg-violet-50 text-violet-600">年派 1 次</span>
+                </div>
+                <div id="dMeta" class="text-xs text-slate-400 mt-1"></div>
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button class="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm hover:bg-blue-800" onclick="openModal('modalLot')">+ 添加批次</button>
+              <button class="px-4 py-2 border border-slate-200 rounded-lg text-sm">编辑持仓</button>
+            </div>
+          </div>
+          <div class="grid grid-cols-5 gap-4 mt-5 pt-5 border-t border-slate-100 text-center">
+            <div><div class="text-xs text-slate-400">当前持仓</div><div id="dShares" class="text-xl font-bold mt-1">100 股</div></div>
+            <div><div class="text-xs text-slate-400">平均成本</div><div id="dAvg" class="text-xl font-bold mt-1">¥ 1,676.00</div></div>
+            <div><div class="text-xs text-slate-400">总投入</div><div id="dCost" class="text-xl font-bold mt-1">¥ 167,600.00</div></div>
+            <div><div class="text-xs text-slate-400">本年分红(税前)</div><div id="dYear" class="text-xl font-bold text-emerald-600 mt-1">¥ 2,580.00</div></div>
+            <div>
+              <div class="text-xs text-slate-400">累计分红</div>
+              <div class="mt-1 flex items-center justify-center gap-2 flex-wrap">
+                <span id="dTotal" class="text-xl font-bold text-emerald-600">¥ 11,923.16</span>
+                <span id="dYoc" class="text-xs bg-emerald-50 text-emerald-600 px-2 py-0.5 rounded-full">TTM成本 3.60%</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex gap-2 mb-4">
+          <button id="dTabLots" onclick="dSwitchTab('lots')" class="px-4 py-2 text-sm rounded-lg bg-blue-900 text-white">买入批次</button>
+          <button id="dTabDivs" onclick="dSwitchTab('divs')" class="px-4 py-2 text-sm rounded-lg border border-slate-200 text-slate-600">分红历史</button>
+        </div>
+
+        <div class="card p-4 mb-4 text-xs bg-amber-50 border border-amber-200 text-amber-700 rounded-xl">
+          💡 分红按<b>股权登记日</b>当天持有的批次计算：买入日期晚于除权除息日的批次，不参与当次分红。每笔分红的批次归属明细见「分红历史」。
+        </div>
+
+        <div id="dPaneLots" class="card overflow-hidden">
+          <table class="whitespace-nowrap">
+            <thead><tr><th>批次日期</th><th>方向</th><th>数量</th><th>成交价</th><th>金额</th><th>费用</th><th>该批次累计分红</th><th>备注</th></tr></thead>
+            <tbody id="dLotsBody"></tbody>
+          </table>
+        </div>
+        <div id="dPaneDivs" class="card overflow-hidden hidden">
+          <table class="whitespace-nowrap">
+            <thead><tr><th>派息日</th><th>除权日</th><th>除权日持仓</th><th>每股分红</th><th>税前金额</th><th>税费</th><th>税后到账</th></tr></thead>
+            <tbody id="dDivsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 分红记录 ============ -->
+      <section id="page-dividends" class="page">
+        <div class="flex justify-between items-center mb-5">
+          <div class="flex gap-2">
+            <select class="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              <option>全部年份</option><option>2026</option><option>2025</option><option>2024</option>
+            </select>
+            <select class="border border-slate-200 rounded-lg px-3 py-2 text-sm">
+              <option>全部市场</option><option>A股</option><option>美股</option><option>基金</option>
+            </select>
+          </div>
+          <div class="flex items-center gap-3">
+            <span class="text-xs text-slate-400">💡 点击行展开批次归属明细</span>
+            <button onclick="openModal('modalDividend')" class="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm hover:bg-blue-800">+ 记录分红</button>
+          </div>
+        </div>
+
+        <div class="card overflow-hidden overflow-x-auto">
+          <table class="whitespace-nowrap">
+            <thead>
+              <tr>
+                <th></th><th>派息日</th><th>持仓</th><th>市场</th><th>每股分红</th><th>除权日持仓</th>
+                <th>税前金额</th><th>税费</th><th>到账金额</th><th>类型</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr class="cursor-pointer" onclick="toggleDivRow(this)">
+                <td class="text-slate-400 div-arrow">▸</td>
+                <td>2026-08-25</td>
+                <td>贵州茅台 (600519)</td>
+                <td><span class="badge bg-red-50 text-red-600">A股</span></td>
+                <td>¥ 25.80</td><td>100 股</td><td>¥ 2,580.00</td><td>¥ 0.00</td>
+                <td class="text-emerald-600 font-semibold">¥ 2,580.00</td>
+                <td>现金分红</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr class="hidden bg-slate-50">
+                <td></td><td colspan="10" class="text-xs text-slate-500">
+                  <span class="font-medium text-slate-600 mr-2">批次归属：</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2022-03-15 批次 60 股 × 25.80 = ¥1,548.00</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2023-09-20 批次 40 股 × 25.80 = ¥1,032.00</span>
+                </td>
+              </tr>
+              <tr class="cursor-pointer" onclick="toggleDivRow(this)">
+                <td class="text-slate-400 div-arrow">▸</td>
+                <td>2026-08-15</td>
+                <td>Apple (AAPL)</td>
+                <td><span class="badge bg-blue-50 text-blue-600">美股</span></td>
+                <td>$ 0.48</td><td>50 股</td><td>$ 24.00</td><td>$ 2.40</td>
+                <td class="text-emerald-600 font-semibold">$ 21.60</td>
+                <td>现金分红</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr class="hidden bg-slate-50">
+                <td></td><td colspan="10" class="text-xs text-slate-500">
+                  <span class="font-medium text-slate-600 mr-2">批次归属：</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2021-06-20 批次 30 股 × 0.48 = $14.40</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2022-11-08 批次 20 股 × 0.48 = $9.60</span>
+                  <span class="inline-block bg-amber-50 border border-amber-200 text-amber-600 rounded px-2 py-0.5 mr-1 mb-1">预扣股息税 10%</span>
+                </td>
+              </tr>
+              <tr class="cursor-pointer" onclick="toggleDivRow(this)">
+                <td class="text-slate-400 div-arrow">▸</td>
+                <td>2026-08-10</td>
+                <td>易方达蓝筹 (005827)</td>
+                <td><span class="badge bg-amber-50 text-amber-600">基金</span></td>
+                <td>¥ 0.0816</td><td>10,000 份</td><td>¥ 816.00</td><td>¥ 0.00</td>
+                <td class="text-emerald-600 font-semibold">¥ 816.00</td>
+                <td>现金分红</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr class="hidden bg-slate-50">
+                <td></td><td colspan="10" class="text-xs text-slate-500">
+                  <span class="font-medium text-slate-600 mr-2">批次归属：</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2020-09-01 批次 6,000 份 → ¥489.60</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2022-06-15 批次 4,000 份 → ¥326.40</span>
+                </td>
+              </tr>
+              <tr class="cursor-pointer" onclick="toggleDivRow(this)">
+                <td class="text-slate-400 div-arrow">▸</td>
+                <td>2026-07-20</td>
+                <td>工商银行 (601398)</td>
+                <td><span class="badge bg-red-50 text-red-600">A股</span></td>
+                <td>¥ 0.30</td><td>3,000 股</td><td>¥ 900.00</td><td>¥ 90.00</td>
+                <td class="text-emerald-600 font-semibold">¥ 810.00</td>
+                <td>现金分红</td>
+                <td><a class="text-blue-600 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr class="hidden bg-slate-50">
+                <td></td><td colspan="10" class="text-xs text-slate-500">
+                  <span class="font-medium text-slate-600 mr-2">批次归属：</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2023-11-10 批次 2,000 股 → ¥600.00</span>
+                  <span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">2024-07-22 批次 1,000 股 → ¥300.00</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ 分红日历 ============ -->
+      <section id="page-calendar" class="page">
+        <div class="flex justify-between items-center mb-5">
+          <div class="flex items-center gap-3">
+            <button class="px-3 py-1 border border-slate-200 rounded">←</button>
+            <span class="font-semibold text-lg">2026 年 9 月</span>
+            <button class="px-3 py-1 border border-slate-200 rounded">→</button>
+          </div>
+          <div class="flex items-center gap-4 text-sm">
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-emerald-100 border border-emerald-500"></span>已到账</span>
+            <span class="flex items-center gap-1"><span class="w-3 h-3 rounded bg-amber-100 border border-amber-500"></span>预告</span>
+          </div>
+        </div>
+
+        <div class="card p-5">
+          <div class="grid grid-cols-7 gap-2 mb-2 text-center text-sm font-medium text-slate-500">
+            <div>周一</div><div>周二</div><div>周三</div><div>周四</div><div>周五</div><div>周六</div><div>周日</div>
+          </div>
+          <div class="grid grid-cols-7 gap-2" id="calendarGrid"></div>
+        </div>
+
+        <!-- 本月分红流水时间线 -->
+        <div class="card p-5 mt-5">
+          <div class="flex justify-between items-center mb-4">
+            <h3 class="font-semibold text-slate-800">本月分红流水</h3>
+            <span class="text-xs text-slate-400">已到账 $18.00 · 预告 ¥1,820 + $18.00</span>
+          </div>
+          <div>
+            <div class="flex gap-4">
+              <div class="flex flex-col items-center">
+                <span class="w-3 h-3 rounded-full bg-emerald-500 mt-1.5"></span>
+                <span class="w-px flex-1 bg-slate-200 my-1"></span>
+              </div>
+              <div class="flex-1 flex justify-between items-start pb-4">
+                <div><div class="text-sm font-medium">Apple (AAPL)</div><div class="text-xs text-slate-400">9月1日 · 50 股 × $0.36 · 已到账</div></div>
+                <div class="text-sm font-semibold text-emerald-600">+$18.00</div>
+              </div>
+            </div>
+            <div class="flex gap-4">
+              <div class="flex flex-col items-center">
+                <span class="w-3 h-3 rounded-full bg-amber-500 mt-1.5"></span>
+                <span class="w-px flex-1 bg-slate-200 my-1"></span>
+              </div>
+              <div class="flex-1 flex justify-between items-start pb-4">
+                <div><div class="text-sm font-medium">工商银行 (601398)</div><div class="text-xs text-slate-400">9月10日 · 3,000 股 × ¥0.42 · 预告（预案已公告）</div></div>
+                <div class="text-sm font-semibold text-amber-600">约 ¥1,260.00</div>
+              </div>
+            </div>
+            <div class="flex gap-4">
+              <div class="flex flex-col items-center">
+                <span class="w-3 h-3 rounded-full bg-amber-500 mt-1.5"></span>
+                <span class="w-px flex-1 bg-slate-200 my-1"></span>
+              </div>
+              <div class="flex-1 flex justify-between items-start pb-4">
+                <div><div class="text-sm font-medium">Microsoft (MSFT)</div><div class="text-xs text-slate-400">9月12日 · 30 股 × $0.60 · 预告（季派例行）</div></div>
+                <div class="text-sm font-semibold text-amber-600">约 $18.00</div>
+              </div>
+            </div>
+            <div class="flex gap-4">
+              <div class="flex flex-col items-center">
+                <span class="w-3 h-3 rounded-full bg-amber-500 mt-1.5"></span>
+              </div>
+              <div class="flex-1 flex justify-between items-start">
+                <div><div class="text-sm font-medium">农业银行 (601288)</div><div class="text-xs text-slate-400">9月18日 · 2,000 股 × ¥0.28 · 预告</div></div>
+                <div class="text-sm font-semibold text-amber-600">约 ¥560.00</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 统计分析 ============ -->
+      <section id="page-stats" class="page">
+        <div class="grid grid-cols-2 gap-5 mb-6">
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">年度分红总额</h3>
+            <div id="chartYear" style="height: 320px;"></div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">各市场累计分红</h3>
+            <div id="chartMarketBar" style="height: 320px;"></div>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-5">
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">持仓分红贡献 Top 10</h3>
+            <div id="chartTop" style="height: 320px;"></div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-4">股息率排行（年化）</h3>
+            <table>
+              <thead><tr><th>持仓</th><th>市值</th><th>年分红</th><th>股息率(现价)</th><th>股息率(TTM成本)</th></tr></thead>
+              <tbody>
+                <tr><td>工商银行</td><td>¥ 15,600</td><td>¥ 1,260</td><td class="text-emerald-600 font-semibold">8.08%</td><td class="text-slate-500">6.19%</td></tr>
+                <tr><td>中国神华</td><td>¥ 42,000</td><td>¥ 2,940</td><td class="text-emerald-600 font-semibold">7.00%</td><td class="text-slate-500">7.42%</td></tr>
+                <tr><td>农业银行</td><td>¥ 18,500</td><td>¥ 1,110</td><td class="text-emerald-600 font-semibold">6.00%</td><td class="text-slate-500">5.50%</td></tr>
+                <tr><td>贵州茅台</td><td>¥ 168,000</td><td>¥ 2,580</td><td class="text-emerald-600 font-semibold">1.54%</td><td class="text-slate-500">3.60%</td></tr>
+                <tr><td>Apple</td><td>$ 8,750</td><td>$ 96</td><td class="text-emerald-600 font-semibold">1.10%</td><td class="text-slate-500">0.86%</td></tr>
+              </tbody>
+            </table>
+            <p class="text-xs text-slate-400 mt-3">TTM成本股息率 = 近12月每股分红 ÷ 你的加权平均成本，分批买入后成本被摊薄/抬高会实时反映</p>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-5 mt-6">
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-1">成本股息率 vs 现价股息率</h3>
+            <p class="text-xs text-slate-400 mb-3">衡量「按买入成本躺收」的真实收益率（参考 Simply Safe Dividends）</p>
+            <div id="chartYield" style="height: 300px;"></div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-1">派息频率分布</h3>
+            <p class="text-xs text-slate-400 mb-3">月派越多，现金流越平滑；年派集中在特定月份</p>
+            <div id="chartFreq" style="height: 300px;"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ 设置 ============ -->
+      <section id="page-settings" class="page">
+        <div class="grid grid-cols-2 gap-5">
+          <div class="card p-6">
+            <h3 class="font-semibold text-slate-800 mb-4">📁 数据导入导出</h3>
+            <div class="space-y-3">
+              <button class="w-full px-4 py-3 border border-slate-200 rounded-lg text-left hover:bg-slate-50">
+                <div class="font-medium">导入 CSV 持仓（含多批次）</div>
+                <div class="text-xs text-slate-400">支持东方财富/同花顺导出 · 一次导入同一股票的多笔买入批次</div>
+              </button>
+              <button class="w-full px-4 py-3 border border-slate-200 rounded-lg text-left hover:bg-slate-50">
+                <div class="font-medium">导入 CSV 分红记录</div>
+                <div class="text-xs text-slate-400">批量导入历史分红 · 自动按除权日匹配归属批次</div>
+              </button>
+              <button class="w-full px-4 py-3 border border-slate-200 rounded-lg text-left hover:bg-slate-50">
+                <div class="font-medium">下载多批次导入模板</div>
+                <div class="text-xs text-slate-400">字段：代码 / 批次日期 / 方向 / 数量 / 价格 / 费用</div>
+              </button>
+              <button class="w-full px-4 py-3 border border-slate-200 rounded-lg text-left hover:bg-slate-50">
+                <div class="font-medium">导出全部数据</div>
+                <div class="text-xs text-slate-400">备份为 CSV / JSON 文件</div>
+              </button>
+            </div>
+          </div>
+          <div class="card p-6">
+            <h3 class="font-semibold text-slate-800 mb-4">💱 汇率设置</h3>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-sm">美元 USD → 人民币</span>
+                <input type="text" value="7.18" class="border border-slate-200 rounded px-3 py-1 w-24 text-right" />
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-sm">港币 HKD → 人民币</span>
+                <input type="text" value="0.92" class="border border-slate-200 rounded px-3 py-1 w-24 text-right" />
+              </div>
+              <label class="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked /> 自动获取实时汇率
+              </label>
+            </div>
+          </div>
+          <div class="card p-6">
+            <h3 class="font-semibold text-slate-800 mb-4">🏦 账户管理</h3>
+            <div class="space-y-2">
+              <div class="flex items-center justify-between py-2 border-b border-slate-100">
+                <span>华泰证券（A股）</span>
+                <a class="text-blue-600 text-sm cursor-pointer">编辑</a>
+              </div>
+              <div class="flex items-center justify-between py-2 border-b border-slate-100">
+                <span>富途牛牛（美股）</span>
+                <a class="text-blue-600 text-sm cursor-pointer">编辑</a>
+              </div>
+              <button class="text-sm text-blue-600">+ 添加账户</button>
+            </div>
+          </div>
+          <div class="card p-6">
+            <h3 class="font-semibold text-slate-800 mb-4">🔔 提醒设置</h3>
+            <label class="flex items-center justify-between py-2">
+              <span class="text-sm">分红到账日前提醒</span>
+              <input type="checkbox" checked />
+            </label>
+            <label class="flex items-center justify-between py-2">
+              <span class="text-sm">除权除息日提醒</span>
+              <input type="checkbox" checked />
+            </label>
+            <label class="flex items-center justify-between py-2">
+              <span class="text-sm">每周分红汇总推送</span>
+              <input type="checkbox" />
+            </label>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </main>
+</div>
+
+<!-- 移动端（App/小程序同构布局）预览：三端适配演示 -->
+<button id="btnMobile" class="fixed bottom-6 right-6 z-30 px-4 py-3 bg-slate-800 text-white rounded-full shadow-lg text-sm hover:bg-slate-700" onclick="openMobile()">📱 移动端预览</button>
+<button id="btnAdmin" class="fixed bottom-6 left-6 z-30 px-4 py-3 bg-slate-900 text-white rounded-full shadow-lg text-sm hover:bg-slate-700" onclick="openAdmin()">🛠️ 运营后台（设计稿）</button>
+
+<!-- ============ 运营后台（独立系统：/admin，管理员账号体系，与用户 App 隔离） ============ -->
+<div id="adminScreen" style="display:none" class="fixed inset-0 z-40 bg-slate-100 flex">
+  <!-- 后台侧边栏 -->
+  <aside class="w-56 bg-slate-900 text-slate-300 flex flex-col shrink-0">
+    <div class="px-5 py-5 flex items-center gap-2 border-b border-white/10">
+      <div class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center font-bold text-white">息</div>
+      <div>
+        <div class="text-white font-bold text-sm leading-tight">息计 · 运营后台</div>
+        <div class="text-[10px] text-slate-400">Admin Console v1.0</div>
+      </div>
+    </div>
+    <nav class="flex-1 p-3 space-y-1 text-sm">
+      <a class="admin-nav active flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-white/10" data-apage="dashboard">📊 <span>运营看板</span></a>
+      <a class="admin-nav flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-white/10" data-apage="schedules">📋 <span>分红预案审核</span><span class="ml-auto text-[10px] bg-amber-500 text-white rounded-full px-1.5">7</span></a>
+      <a class="admin-nav flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-white/10" data-apage="users">👥 <span>用户管理</span></a>
+      <a class="admin-nav flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-white/10" data-apage="config">💱 <span>汇率与税率</span></a>
+      <a class="admin-nav flex items-center gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover:bg-white/10" data-apage="notice">📢 <span>公告与反馈</span></a>
+    </nav>
+    <div class="p-3 border-t border-white/10 text-[11px] text-slate-400">
+      管理员：admin@xi.com<br/>角色：超级管理员
+    </div>
+  </aside>
+
+  <!-- 后台主区域 -->
+  <div class="flex-1 flex flex-col min-w-0">
+    <header class="bg-white border-b border-slate-200 px-6 py-3 flex items-center justify-between shrink-0">
+      <div class="flex items-center gap-2 text-sm text-slate-500">
+        <span id="adminCrumb">运营看板</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <span class="text-xs text-slate-400">后台与用户 App 数据隔离 · 操作留痕</span>
+        <button onclick="closeAdmin()" class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">← 返回前台 App</button>
+      </div>
+    </header>
+
+    <div class="flex-1 overflow-y-auto p-6">
+
+      <!-- ===== 后台-运营看板 ===== -->
+      <section id="apage-dashboard" class="admin-page active">
+        <h1 class="text-xl font-bold text-slate-800 mb-4">运营看板</h1>
+        <div class="grid grid-cols-4 gap-4 mb-5">
+          <div class="card p-5"><div class="text-sm text-slate-500">注册用户</div><div class="text-2xl font-bold text-slate-800 mt-1">1,286</div><div class="text-xs text-emerald-600 mt-1">本周 +42</div></div>
+          <div class="card p-5"><div class="text-sm text-slate-500">今日活跃 (DAU)</div><div class="text-2xl font-bold text-slate-800 mt-1">318</div><div class="text-xs text-slate-400 mt-1">DAU/MAU 24%</div></div>
+          <div class="card p-5"><div class="text-sm text-slate-500">用户分红记录</div><div class="text-2xl font-bold text-slate-800 mt-1">18,462 <span class="text-sm font-normal text-slate-400">条</span></div><div class="text-xs text-slate-400 mt-1">持仓 4,930 只 · 批次 12,074 笔</div></div>
+          <div class="card p-5 border-2 border-amber-300"><div class="text-sm text-slate-500">待审核预案</div><div class="text-2xl font-bold text-amber-600 mt-1">7 <span class="text-sm font-normal">条</span></div><div class="text-xs text-amber-600 mt-1 cursor-pointer" onclick="adminGo('schedules')">去审核 →</div></div>
+        </div>
+        <div class="grid grid-cols-3 gap-4">
+          <div class="card p-5 col-span-2">
+            <h3 class="font-semibold text-slate-800 mb-3">近 30 天新增用户 / 活跃趋势</h3>
+            <div id="chartAdminUsers" style="height: 280px;"></div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-3">预案数据来源</h3>
+            <div id="chartAdminSource" style="height: 200px;"></div>
+            <div class="mt-3 text-xs text-slate-500 space-y-1">
+              <div class="flex justify-between"><span>🕷️ 爬虫今日采集</span><span class="font-medium">23 条</span></div>
+              <div class="flex justify-between"><span>✅ 今日已发布</span><span class="font-medium text-emerald-600">16 条</span></div>
+              <div class="flex justify-between"><span>⚠️ 低置信度待人工</span><span class="font-medium text-amber-600">3 条</span></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 后台-分红预案审核 ===== -->
+      <section id="apage-schedules" class="admin-page" style="display:none">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <h1 class="text-xl font-bold text-slate-800">分红预案审核</h1>
+          <div class="flex gap-2">
+            <button class="px-4 py-2 border border-slate-200 bg-white rounded-lg text-sm hover:bg-slate-50">🕷️ 立即爬取公告</button>
+            <button class="px-4 py-2 bg-slate-900 text-white rounded-lg text-sm hover:bg-slate-700">+ 手动录入预案</button>
+          </div>
+        </div>
+        <div class="card p-4 mb-4 flex gap-2 items-center flex-wrap text-sm">
+          <button class="px-3 py-1.5 rounded-lg bg-slate-900 text-white">待审核 7</button>
+          <button class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600">已发布 342</button>
+          <button class="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-slate-600">已驳回 18</button>
+          <span class="text-slate-300">|</span>
+          <select class="border border-slate-200 rounded-lg px-3 py-1.5"><option>全部市场</option><option>A股</option><option>美股</option><option>港股</option><option>基金</option></select>
+          <span class="text-xs text-slate-400 ml-auto">审核通过后自动进入用户 App 的「即将到账」与分红提醒</span>
+        </div>
+        <div class="card overflow-hidden overflow-x-auto">
+          <table class="whitespace-nowrap">
+            <thead><tr>
+              <th>市场</th><th>代码</th><th>名称</th><th>类型</th><th>每股分红</th><th>股权登记日</th><th>除权日</th><th>派息日</th>
+              <th>来源</th><th>置信度</th><th>状态</th><th>操作</th>
+            </tr></thead>
+            <tbody>
+              <tr>
+                <td><span class="badge bg-red-50 text-red-600">A股</span></td><td>601398</td><td>工商银行</td><td>现金分红</td><td>¥ 0.420</td>
+                <td>2026-09-09</td><td>2026-09-10</td><td>2026-09-10</td>
+                <td><span class="badge bg-violet-50 text-violet-600">🕷️ 爬虫</span></td>
+                <td><div class="flex items-center gap-1.5"><div class="w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width:96%"></div></div><span class="text-xs text-emerald-600">96%</span></div></td>
+                <td><span class="badge bg-amber-50 text-amber-600">待审核</span></td>
+                <td><a class="text-emerald-600 text-sm cursor-pointer">通过</a> · <a class="text-red-500 text-sm cursor-pointer">驳回</a> · <a class="text-slate-500 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr>
+                <td><span class="badge bg-blue-50 text-blue-600">美股</span></td><td>MSFT</td><td>Microsoft</td><td>现金分红</td><td>$ 0.60</td>
+                <td>2026-08-20</td><td>2026-08-20</td><td>2026-09-12</td>
+                <td><span class="badge bg-violet-50 text-violet-600">🕷️ 爬虫</span></td>
+                <td><div class="flex items-center gap-1.5"><div class="w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-emerald-500" style="width:92%"></div></div><span class="text-xs text-emerald-600">92%</span></div></td>
+                <td><span class="badge bg-amber-50 text-amber-600">待审核</span></td>
+                <td><a class="text-emerald-600 text-sm cursor-pointer">通过</a> · <a class="text-red-500 text-sm cursor-pointer">驳回</a> · <a class="text-slate-500 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr>
+                <td><span class="badge bg-red-50 text-red-600">A股</span></td><td>601288</td><td>农业银行</td><td>现金分红</td><td>¥ 0.280</td>
+                <td>2026-09-17</td><td>2026-09-18</td><td>2026-09-18</td>
+                <td><span class="badge bg-violet-50 text-violet-600">🕷️ 爬虫</span></td>
+                <td><div class="flex items-center gap-1.5"><div class="w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-amber-500" style="width:68%"></div></div><span class="text-xs text-amber-600">68%</span></div></td>
+                <td><span class="badge bg-amber-50 text-amber-600">待审核</span></td>
+                <td><a class="text-emerald-600 text-sm cursor-pointer">通过</a> · <a class="text-red-500 text-sm cursor-pointer">驳回</a> · <a class="text-slate-500 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+              <tr class="bg-amber-50/40">
+                <td><span class="badge bg-amber-50 text-amber-600">基金</span></td><td>005827</td><td>易方达蓝筹</td><td>现金分红</td><td>¥ 0.0920</td>
+                <td>2026-09-22</td><td>2026-09-23</td><td>2026-09-24</td>
+                <td><span class="badge bg-slate-100 text-slate-500">👤 用户提交</span></td>
+                <td><div class="flex items-center gap-1.5"><div class="w-14 h-1.5 bg-slate-100 rounded-full overflow-hidden"><div class="h-full bg-red-500" style="width:54%"></div></div><span class="text-xs text-red-600">54%</span></div></td>
+                <td><span class="badge bg-red-50 text-red-600">需人工核对</span></td>
+                <td><a class="text-emerald-600 text-sm cursor-pointer">通过</a> · <a class="text-red-500 text-sm cursor-pointer">驳回</a> · <a class="text-slate-500 text-sm cursor-pointer">编辑</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="text-xs text-slate-400 mt-3">🕷️ 置信度规则：交易所/公司公告原文 &gt;90% 自动待发布；财经媒体转载 70–90% 待审核；用户提交 &lt;70% 必须人工核对。</p>
+      </section>
+
+      <!-- ===== 后台-用户管理 ===== -->
+      <section id="apage-users" class="admin-page" style="display:none">
+        <h1 class="text-xl font-bold text-slate-800 mb-4">用户管理</h1>
+        <div class="card p-4 mb-4 flex gap-2 items-center flex-wrap text-sm">
+          <input class="border border-slate-200 rounded-lg px-3 py-1.5 w-64" placeholder="搜索用户名 / 邮箱 / ID" />
+          <select class="border border-slate-200 rounded-lg px-3 py-1.5"><option>全部状态</option><option>正常</option><option>已封禁</option></select>
+          <select class="border border-slate-200 rounded-lg px-3 py-1.5"><option>全部角色</option><option>普通用户</option><option>管理员</option></select>
+          <button class="px-3 py-1.5 bg-slate-900 text-white rounded-lg">搜索</button>
+          <span class="text-xs text-slate-400 ml-auto">管理员仅可查看用户数据用于客服排查，不可修改用户持仓/分红记录</span>
+        </div>
+        <div class="card overflow-hidden overflow-x-auto">
+          <table class="whitespace-nowrap">
+            <thead><tr>
+              <th>ID</th><th>用户名</th><th>邮箱</th><th>持仓</th><th>分红记录</th><th>累计分红(折CNY)</th><th>注册时间</th><th>最近登录</th><th>角色</th><th>状态</th><th>操作</th>
+            </tr></thead>
+            <tbody>
+              <tr><td>1,024</td><td>demo@xi.com</td><td>demo@xi.com</td><td>24 只</td><td>86 条</td><td class="text-emerald-600 font-medium">¥ 86,420</td><td>2024-03-12</td><td>2026-09-05</td><td><span class="badge bg-slate-100 text-slate-600">普通用户</span></td><td><span class="badge bg-emerald-50 text-emerald-600">正常</span></td><td><a class="text-blue-600 text-sm cursor-pointer">查看数据</a> · <a class="text-amber-600 text-sm cursor-pointer">重置密码</a> · <a class="text-red-500 text-sm cursor-pointer">封禁</a></td></tr>
+              <tr><td>1,187</td><td>value_investor</td><td>vi****@163.com</td><td>31 只</td><td>142 条</td><td class="text-emerald-600 font-medium">¥ 214,800</td><td>2025-01-08</td><td>2026-09-04</td><td><span class="badge bg-slate-100 text-slate-600">普通用户</span></td><td><span class="badge bg-emerald-50 text-emerald-600">正常</span></td><td><a class="text-blue-600 text-sm cursor-pointer">查看数据</a> · <a class="text-amber-600 text-sm cursor-pointer">重置密码</a> · <a class="text-red-500 text-sm cursor-pointer">封禁</a></td></tr>
+              <tr><td>903</td><td>div_king</td><td>dk****@gmail.com</td><td>12 只</td><td>54 条</td><td class="text-emerald-600 font-medium">$ 4,260</td><td>2023-11-20</td><td>2026-08-30</td><td><span class="badge bg-slate-100 text-slate-600">普通用户</span></td><td><span class="badge bg-emerald-50 text-emerald-600">正常</span></td><td><a class="text-blue-600 text-sm cursor-pointer">查看数据</a> · <a class="text-amber-600 text-sm cursor-pointer">重置密码</a> · <a class="text-red-500 text-sm cursor-pointer">封禁</a></td></tr>
+              <tr><td>1</td><td>admin</td><td>admin@xi.com</td><td>—</td><td>—</td><td>—</td><td>2024-01-01</td><td>2026-09-05</td><td><span class="badge bg-violet-50 text-violet-600">超级管理员</span></td><td><span class="badge bg-emerald-50 text-emerald-600">正常</span></td><td><span class="text-slate-300 text-sm">不可操作</span></td></tr>
+              <tr><td>756</td><td>spam_test01</td><td>t***@tempmail.com</td><td>0 只</td><td>0 条</td><td>—</td><td>2026-07-15</td><td>2026-07-16</td><td><span class="badge bg-slate-100 text-slate-600">普通用户</span></td><td><span class="badge bg-red-50 text-red-600">已封禁</span></td><td><a class="text-emerald-600 text-sm cursor-pointer">解封</a></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== 后台-汇率与税率 ===== -->
+      <section id="apage-config" class="admin-page" style="display:none">
+        <h1 class="text-xl font-bold text-slate-800 mb-4">汇率与税率配置</h1>
+        <div class="grid grid-cols-2 gap-4 mb-5">
+          <div class="card p-5">
+            <div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-slate-800">美元汇率</h3><button class="text-xs px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50">🔄 自动获取（央行中间价）</button></div>
+            <div class="flex items-end gap-2"><span class="text-3xl font-bold text-slate-800">7.1200</span><span class="text-sm text-slate-400 mb-1">CNY / USD</span></div>
+            <div class="text-xs text-slate-400 mt-2">更新于 2026-09-05 09:30 · 每日自动更新，历史分红按派息日汇率折算</div>
+          </div>
+          <div class="card p-5">
+            <div class="flex justify-between items-center mb-3"><h3 class="font-semibold text-slate-800">港币汇率</h3><button class="text-xs px-3 py-1.5 border border-slate-200 rounded-lg hover:bg-slate-50">🔄 自动获取（央行中间价）</button></div>
+            <div class="flex items-end gap-2"><span class="text-3xl font-bold text-slate-800">0.9128</span><span class="text-sm text-slate-400 mb-1">CNY / HKD</span></div>
+            <div class="text-xs text-slate-400 mt-2">更新于 2026-09-05 09:30</div>
+          </div>
+        </div>
+        <div class="card overflow-hidden mb-5">
+          <div class="px-5 py-4 border-b border-slate-100"><h3 class="font-semibold text-slate-800">各市场股息税率（用于税后到账估算）</h3></div>
+          <table>
+            <thead><tr><th>市场</th><th>税务情形</th><th>税率</th><th>说明</th><th>状态</th></tr></thead>
+            <tbody>
+              <tr><td><span class="badge bg-red-50 text-red-600">A股</span></td><td>持股 &gt; 1 年</td><td class="font-medium">0%</td><td class="text-slate-500 text-sm">长期持有免税（红利所得暂免）</td><td><span class="badge bg-emerald-50 text-emerald-600">生效中</span></td></tr>
+              <tr><td><span class="badge bg-red-50 text-red-600">A股</span></td><td>持股 1 个月 ~ 1 年</td><td class="font-medium">10%</td><td class="text-slate-500 text-sm">派息时按 5% 暂扣，卖出时补扣</td><td><span class="badge bg-emerald-50 text-emerald-600">生效中</span></td></tr>
+              <tr><td><span class="badge bg-red-50 text-red-600">A股</span></td><td>持股 ≤ 1 个月</td><td class="font-medium">20%</td><td class="text-slate-500 text-sm">全额计税</td><td><span class="badge bg-emerald-50 text-emerald-600">生效中</span></td></tr>
+              <tr><td><span class="badge bg-blue-50 text-blue-600">美股</span></td><td>W-8BEN 中国居民</td><td class="font-medium">10%</td><td class="text-slate-500 text-sm">券商代扣预提税</td><td><span class="badge bg-emerald-50 text-emerald-600">生效中</span></td></tr>
+              <tr><td><span class="badge bg-emerald-50 text-emerald-600">港股通</span></td><td>内地个人投资者</td><td class="font-medium">20%</td><td class="text-slate-500 text-sm">H股 10% + 红利税 10%，由中登代扣</td><td><span class="badge bg-emerald-50 text-emerald-600">生效中</span></td></tr>
+              <tr><td><span class="badge bg-amber-50 text-amber-600">基金</span></td><td>公募基金分红</td><td class="font-medium">0%</td><td class="text-slate-500 text-sm">个人投资者暂免征收</td><td><span class="badge bg-emerald-50 text-emerald-600">生效中</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="card p-5">
+          <h3 class="font-semibold text-slate-800 mb-3">分红提醒与预告规则</h3>
+          <div class="grid grid-cols-2 gap-4 text-sm">
+            <label class="flex items-center gap-2"><input type="checkbox" checked class="w-4 h-4"/> 预案审核通过后自动推送给持仓用户（App 推送 / 小程序订阅消息）</label>
+            <label class="flex items-center gap-2"><input type="checkbox" checked class="w-4 h-4"/> 派息日前 3 天、当天各提醒一次</label>
+            <label class="flex items-center gap-2"><input type="checkbox" checked class="w-4 h-4"/> 季派/月派股票按历史派息节奏自动生成推算预告</label>
+            <label class="flex items-center gap-2"><input type="checkbox" class="w-4 h-4"/> 允许用户提交预案（需人工审核）</label>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== 后台-公告与反馈 ===== -->
+      <section id="apage-notice" class="admin-page" style="display:none">
+        <h1 class="text-xl font-bold text-slate-800 mb-4">公告与反馈</h1>
+        <div class="grid grid-cols-2 gap-4">
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-3">发布系统公告</h3>
+            <div class="space-y-3 text-sm">
+              <input class="w-full border border-slate-200 rounded-lg px-3 py-2" placeholder="公告标题，如：新增港股通持仓支持" />
+              <textarea class="w-full border border-slate-200 rounded-lg px-3 py-2 h-28" placeholder="公告内容（支持三端展示：Web / App / 小程序）"></textarea>
+              <div class="flex items-center gap-3">
+                <button class="px-4 py-2 bg-slate-900 text-white rounded-lg">发布</button>
+                <span class="text-xs text-slate-400">发布后用户 App 首页顶部展示横幅</span>
+              </div>
+            </div>
+            <div class="mt-4 border-t border-slate-100 pt-3">
+              <div class="text-xs font-medium text-slate-500 mb-2">历史公告</div>
+              <div class="space-y-2 text-sm">
+                <div class="flex justify-between"><span>v1.1 上线：支持多批次买入与批次归属</span><span class="text-xs text-slate-400">2026-09-01</span></div>
+                <div class="flex justify-between"><span>微信小程序端灰度开放</span><span class="text-xs text-slate-400">2026-08-18</span></div>
+                <div class="flex justify-between"><span>美股分红税计算口径调整说明</span><span class="text-xs text-slate-400">2026-07-05</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="card p-5">
+            <h3 class="font-semibold text-slate-800 mb-3">用户反馈</h3>
+            <div class="space-y-3 text-sm">
+              <div class="border border-slate-100 rounded-lg p-3">
+                <div class="flex justify-between"><span class="font-medium">value_investor</span><span class="text-xs text-slate-400">2026-09-04</span></div>
+                <p class="text-slate-600 mt-1">建议增加港股通的分红税自动计算，现在要手动填税费。</p>
+                <div class="flex gap-2 mt-2"><span class="badge bg-emerald-50 text-emerald-600">已采纳 · 排期中</span></div>
+              </div>
+              <div class="border border-slate-100 rounded-lg p-3">
+                <div class="flex justify-between"><span class="font-medium">div_king</span><span class="text-xs text-slate-400">2026-08-29</span></div>
+                <p class="text-slate-600 mt-1">希望支持 QDII 基金的分红记录，净值币种是美元但交易在国内。</p>
+                <div class="flex gap-2 mt-2"><span class="badge bg-amber-50 text-amber-600">待评估</span></div>
+              </div>
+              <div class="border border-slate-100 rounded-lg p-3">
+                <div class="flex justify-between"><span class="font-medium">demo@xi.com</span><span class="text-xs text-slate-400">2026-08-20</span></div>
+                <p class="text-slate-600 mt-1">Excel 导入时同一股票多笔买入会被覆盖，能不能自动拆成批次？</p>
+                <div class="flex gap-2 mt-2"><span class="badge bg-blue-50 text-blue-600">已上线 v1.1</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- 移动端（App/小程序同构布局）预览：三端适配演示 -->
+<div id="mobilePreview" style="display:none" class="fixed inset-0 z-30 bg-black/60 items-center justify-center">
+  <div class="relative">
+    <button onclick="closeMobile()" class="absolute -top-9 right-0 text-white/80 hover:text-white text-sm">✕ 关闭预览</button>
+    <div class="w-[375px] h-[780px] bg-slate-50 rounded-[40px] border-[10px] border-slate-900 overflow-hidden flex flex-col shadow-2xl">
+      <!-- 状态栏 -->
+      <div class="bg-blue-900 text-white text-[10px] flex justify-between px-6 pt-2 pb-1 shrink-0">
+        <span>9:41</span><span>●●● 5G 🔋</span>
+      </div>
+      <!-- 顶部栏 -->
+      <div class="bg-blue-900 text-white px-5 pb-4 pt-1 shrink-0">
+        <div class="text-xs opacity-70">息计 · App / 小程序同构布局</div>
+        <div class="text-xl font-bold" id="mTitle">总览</div>
+      </div>
+      <!-- 内容区 -->
+      <div id="mBody" class="flex-1 overflow-y-auto p-3 space-y-3"></div>
+      <!-- 底部 TabBar（含安全区适配） -->
+      <div id="mTabbar" class="bg-white border-t border-slate-200 flex text-center text-[11px] shrink-0" style="padding-bottom: env(safe-area-inset-bottom);"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 添加持仓弹窗 -->
+<div id="modalHolding" class="modal">
+  <div class="bg-white rounded-xl p-6 w-96">
+    <h3 class="font-bold text-lg mb-4">添加持仓</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-sm text-slate-600">市场</label>
+        <select class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1">
+          <option>A股</option><option>美股</option><option>港股</option><option>基金</option><option>债券</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm text-slate-600">代码</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="如 600519" /></div>
+        <div><label class="text-sm text-slate-600">名称</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="如 贵州茅台" /></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm text-slate-600">持仓数量</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="100" /></div>
+        <div><label class="text-sm text-slate-600">成本价</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="1680.00" /></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm text-slate-600">买入日期</label><input type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" /></div>
+        <div><label class="text-sm text-slate-600">币种</label>
+          <select class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1">
+            <option>CNY</option><option>USD</option><option>HKD</option>
+          </select>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400">首次买入将作为第 1 笔批次；后续加仓/减仓在「持仓详情」中记录，分红按除权日自动归属批次。</p>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button onclick="closeModal('modalHolding')" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
+      <button onclick="closeModal('modalHolding')" class="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 添加批次（加仓/减仓）弹窗 -->
+<div id="modalLot" class="modal">
+  <div class="bg-white rounded-xl p-6 w-96">
+    <h3 class="font-bold text-lg mb-4">添加买入批次</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-sm text-slate-600">所属持仓</label>
+        <select class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1">
+          <option>贵州茅台 (600519)</option><option>Apple (AAPL)</option><option>工商银行 (601398)</option><option>腾讯控股 (00700)</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm text-slate-600">方向</label>
+          <select class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1">
+            <option>买入</option><option>卖出</option><option>送股 / 转增</option>
+          </select>
+        </div>
+        <div><label class="text-sm text-slate-600">成交日期</label><input type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" /></div>
+      </div>
+      <div class="grid grid-cols-3 gap-3">
+        <div><label class="text-sm text-slate-600">数量</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="40" /></div>
+        <div><label class="text-sm text-slate-600">成交价</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="1820.00" /></div>
+        <div><label class="text-sm text-slate-600">费用</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="12.00" /></div>
+      </div>
+      <div><label class="text-sm text-slate-600">备注</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="如：回调加仓" /></div>
+      <p class="text-xs text-slate-400">保存后自动重算平均成本与股息率；该批次只参与「买入日期之后」的分红归属计算。</p>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button onclick="closeModal('modalLot')" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
+      <button onclick="closeModal('modalLot')" class="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm">保存</button>
+    </div>
+  </div>
+</div>
+
+<!-- 记录分红弹窗 -->
+<div id="modalDividend" class="modal">
+  <div class="bg-white rounded-xl p-6 w-96">
+    <h3 class="font-bold text-lg mb-4">记录分红</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-sm text-slate-600">选择持仓</label>
+        <select class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1">
+          <option>贵州茅台 (600519)</option><option>Apple (AAPL)</option>
+        </select>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm text-slate-600">除权日</label><input type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" /></div>
+        <div><label class="text-sm text-slate-600">派息日</label><input type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" /></div>
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="text-sm text-slate-600">每股分红</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="25.80" /></div>
+        <div><label class="text-sm text-slate-600">税费</label><input class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1" placeholder="0.00" /></div>
+      </div>
+      <div>
+        <label class="text-sm text-slate-600">分红类型</label>
+        <select class="w-full border border-slate-200 rounded-lg px-3 py-2 mt-1">
+          <option>现金分红</option><option>送股</option><option>转增</option>
+        </select>
+      </div>
+    </div>
+    <div class="flex justify-end gap-2 mt-5">
+      <button onclick="closeModal('modalDividend')" class="px-4 py-2 border border-slate-200 rounded-lg text-sm">取消</button>
+      <button onclick="closeModal('modalDividend')" class="px-4 py-2 bg-blue-900 text-white rounded-lg text-sm">保存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// 导航切换
+document.querySelectorAll('.nav-item').forEach(item => {
+  item.addEventListener('click', () => {
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    item.classList.add('active');
+    const page = item.dataset.page;
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    document.getElementById('pageTitle').textContent = item.querySelector('span:last-child').textContent;
+    setTimeout(initCharts, 50);
+  });
+});
+
+function openModal(id) { document.getElementById(id).classList.add('show'); }
+function closeModal(id) { document.getElementById(id).classList.remove('show'); }
+
+// 多用户演示：登录 / 注册切换 / 退出
+const loginScreen = document.getElementById('loginScreen');
+document.getElementById('btnLogin').addEventListener('click', () => {
+  const user = document.getElementById('loginUser').value.trim() || 'demo@xi.com';
+  document.getElementById('headerUser').textContent = user;
+  document.getElementById('headerAvatar').textContent = user[0].toUpperCase();
+  loginScreen.style.display = 'none';
+});
+document.getElementById('tabLogin').addEventListener('click', () => switchAuthTab(true));
+document.getElementById('tabRegister').addEventListener('click', () => switchAuthTab(false));
+function switchAuthTab(isLogin) {
+  const on = 'flex-1 pb-2 font-medium text-blue-900 border-b-2 border-blue-900';
+  const off = 'flex-1 pb-2 text-slate-400 border-b-2 border-transparent';
+  document.getElementById('tabLogin').className = isLogin ? on : off;
+  document.getElementById('tabRegister').className = isLogin ? off : on;
+  document.getElementById('regExtra').classList.toggle('hidden', isLogin);
+  document.getElementById('btnLogin').textContent = isLogin ? '登 录' : '注 册';
+}
+function logout() { loginScreen.style.display = 'flex'; }
+
+// 三端适配演示：移动端（App/小程序同构）预览
+function openMobile() { document.getElementById('mobilePreview').style.display = 'flex'; }
+function closeMobile() { document.getElementById('mobilePreview').style.display = 'none'; }
+
+// ============ 运营后台（独立系统演示） ============
+const adminScreen = document.getElementById('adminScreen');
+const adminCrumbNames = { dashboard: '运营看板', schedules: '分红预案审核', users: '用户管理', config: '汇率与税率', notice: '公告与反馈' };
+let adminChartsInited = false;
+
+function openAdmin() {
+  adminScreen.style.display = 'flex';
+  setTimeout(initAdminCharts, 60);
+}
+function closeAdmin() { adminScreen.style.display = 'none'; }
+
+function adminGo(page) {
+  document.querySelectorAll('.admin-nav').forEach(n => n.classList.toggle('active', n.dataset.apage === page));
+  document.querySelectorAll('.admin-page').forEach(p => p.style.display = p.id === 'apage-' + page ? 'block' : 'none');
+  document.getElementById('adminCrumb').textContent = adminCrumbNames[page] || '';
+  setTimeout(initAdminCharts, 60);
+}
+document.querySelectorAll('.admin-nav').forEach(item => {
+  item.addEventListener('click', () => adminGo(item.dataset.apage));
+});
+
+function initAdminCharts() {
+  if (adminScreen.style.display === 'none' || adminScreen.style.display === '') return;
+  const dash = document.getElementById('apage-dashboard');
+  if (dash.style.display === 'none') return;
+  const days = Array.from({ length: 30 }, (_, i) => (i + 1) + '日');
+  const newUsers = [12, 18, 9, 15, 22, 31, 14, 16, 11, 19, 24, 17, 13, 20, 28, 35, 18, 12, 21, 26, 19, 15, 23, 30, 27, 16, 22, 29, 38, 42];
+  const active = [180, 195, 170, 210, 240, 268, 220, 205, 190, 230, 255, 248, 215, 232, 275, 290, 260, 225, 245, 270, 285, 240, 252, 295, 305, 268, 278, 300, 312, 318];
+
+  const cu = echarts.init(document.getElementById('chartAdminUsers'));
+  cu.setOption({
+    tooltip: { trigger: 'axis' },
+    legend: { data: ['新增用户', '日活'], top: 0 },
+    grid: { left: 45, right: 20, top: 30, bottom: 30 },
+    xAxis: { type: 'category', data: days, axisLabel: { interval: 4 } },
+    yAxis: { type: 'value' },
+    series: [
+      { name: '新增用户', type: 'bar', itemStyle: { color: '#0f172a', borderRadius: [3, 3, 0, 0] }, data: newUsers },
+      { name: '日活', type: 'line', smooth: true, itemStyle: { color: '#f59e0b' }, lineStyle: { width: 2 }, data: active }
+    ]
+  });
+
+  const cs = echarts.init(document.getElementById('chartAdminSource'));
+  cs.setOption({
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 条 ({d}%)' },
+    series: [{
+      type: 'pie', radius: ['50%', '72%'],
+      data: [
+        { value: 312, name: '爬虫自动采集', itemStyle: { color: '#0f172a' } },
+        { value: 28, name: '人工录入', itemStyle: { color: '#64748b' } },
+        { value: 14, name: '用户提交', itemStyle: { color: '#f59e0b' } }
+      ],
+      label: { fontSize: 11, formatter: '{b}\n{c} 条' }
+    }]
+  });
+  adminChartsInited = true;
+}
+window.addEventListener('resize', () => {
+  if (adminScreen.style.display === 'flex') {
+    const cu = echarts.getInstanceByDom(document.getElementById('chartAdminUsers'));
+    const cs = echarts.getInstanceByDom(document.getElementById('chartAdminSource'));
+    if (cu) cu.resize(); if (cs) cs.resize();
+  }
+});
+
+const mTabs = [
+  { id: 'overview', name: '总览', icon: '📊' },
+  { id: 'holdings', name: '持仓', icon: '📈' },
+  { id: 'record',   name: '记分红', icon: '➕' },
+  { id: 'calendar', name: '日历', icon: '📅' },
+  { id: 'mine',     name: '我的', icon: '👤' }
+];
+
+// 迷你日历（绿色=已到账，黄色=预告）
+let mCal = '';
+const mPaid = { 1: 1, 10: 1, 12: 2, 18: 2 };
+for (let d = 1; d <= 30; d++) {
+  const t = mPaid[d];
+  const cls = t === 1 ? 'bg-emerald-100 text-emerald-700' : t === 2 ? 'bg-amber-100 text-amber-700' : 'bg-white text-slate-500';
+  mCal += `<div class="${cls} rounded text-center py-1.5 text-[10px] font-medium">${d}${t ? '<br>' + (t === 1 ? '已到账' : '预告') : ''}</div>`;
+}
+
+const mView = {
+  overview: `
+    <div class="grid grid-cols-2 gap-2">
+      <div class="bg-white rounded-xl p-3 shadow-sm"><div class="text-xs text-slate-400">2026年度分红</div><div class="text-lg font-bold text-slate-800">¥28,650</div><div class="text-[10px] text-emerald-600">↑12.5%</div></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm"><div class="text-xs text-slate-400">本月到账</div><div class="text-lg font-bold text-slate-800">¥3,420</div><div class="text-[10px] text-slate-400">3 笔</div></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm"><div class="text-xs text-slate-400">累计分红</div><div class="text-lg font-bold text-slate-800">¥86,420</div><div class="text-[10px] text-slate-400">自 2020</div></div>
+      <div class="bg-white rounded-xl p-3 shadow-sm"><div class="text-xs text-slate-400">持仓数量</div><div class="text-lg font-bold text-slate-800">24 只</div><div class="text-[10px] text-slate-400">A股12·美股6·基金6</div></div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow-sm">
+      <div class="text-sm font-semibold mb-2">分红趋势（近12月）</div>
+      <div class="flex items-end gap-1 h-20">
+        <div class="flex-1 bg-blue-900/80 rounded-t" style="height:35%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:45%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:30%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:55%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:40%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:65%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:50%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:70%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:60%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:80%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:75%"></div><div class="flex-1 bg-blue-900/80 rounded-t" style="height:58%"></div>
+      </div>
+      <div class="flex justify-between text-[9px] text-slate-400 mt-1"><span>10月</span><span>1月</span><span>4月</span><span>7月</span><span>9月</span></div>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow-sm">
+      <div class="text-sm font-semibold mb-2">最近到账</div>
+      <div class="flex justify-between py-1.5 border-b border-slate-100"><div><div class="text-xs font-medium">贵州茅台</div><div class="text-[10px] text-slate-400">08-25 派息</div></div><div class="text-xs font-semibold text-emerald-600">+¥2,580</div></div>
+      <div class="flex justify-between py-1.5 border-b border-slate-100"><div><div class="text-xs font-medium">Apple</div><div class="text-[10px] text-slate-400">08-15 派息</div></div><div class="text-xs font-semibold text-emerald-600">+$21.60</div></div>
+      <div class="flex justify-between py-1.5"><div><div class="text-xs font-medium">易方达蓝筹</div><div class="text-[10px] text-slate-400">08-10 派息</div></div><div class="text-xs font-semibold text-emerald-600">+¥816</div></div>
+    </div>`,
+  holdings: `
+    <div class="bg-white rounded-xl shadow-sm divide-y divide-slate-100">
+      <div class="flex items-center justify-between p-3"><div><div class="text-sm font-medium">贵州茅台 <span class="text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full">A股</span></div><div class="text-[10px] text-slate-400">100 股 · 成本 ¥1,680</div></div><div class="text-right"><div class="text-xs font-semibold text-emerald-600">¥12,800</div><div class="text-[10px] text-slate-400">累计分红</div></div></div>
+      <div class="flex items-center justify-between p-3"><div><div class="text-sm font-medium">Apple <span class="text-[10px] bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded-full">美股</span></div><div class="text-[10px] text-slate-400">50 股 · 成本 $142.5</div></div><div class="text-right"><div class="text-xs font-semibold text-emerald-600">$312.00</div><div class="text-[10px] text-slate-400">累计分红</div></div></div>
+      <div class="flex items-center justify-between p-3"><div><div class="text-sm font-medium">工商银行 <span class="text-[10px] bg-red-50 text-red-600 px-1.5 py-0.5 rounded-full">A股</span></div><div class="text-[10px] text-slate-400">3,000 股 · 成本 ¥4.85</div></div><div class="text-right"><div class="text-xs font-semibold text-emerald-600">¥2,520</div><div class="text-[10px] text-slate-400">累计分红</div></div></div>
+      <div class="flex items-center justify-between p-3"><div><div class="text-sm font-medium">易方达蓝筹 <span class="text-[10px] bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded-full">基金</span></div><div class="text-[10px] text-slate-400">10,000 份 · 成本 ¥2.15</div></div><div class="text-right"><div class="text-xs font-semibold text-emerald-600">¥2,448</div><div class="text-[10px] text-slate-400">累计分红</div></div></div>
+    </div>
+    <button class="w-full py-3 bg-blue-900 text-white rounded-xl text-sm">+ 添加持仓</button>`,
+  record: `
+    <div class="bg-white rounded-xl p-6 text-center shadow-sm">
+      <div class="w-16 h-16 mx-auto rounded-full bg-blue-900 text-white flex items-center justify-center text-3xl font-bold">+</div>
+      <div class="mt-3 font-semibold">记录一笔分红</div>
+      <div class="text-xs text-slate-400 mt-1">选择持仓 → 填写派息日与金额 → 自动计入统计</div>
+      <button class="mt-4 w-full py-2.5 bg-blue-900 text-white rounded-xl text-sm">开始记录</button>
+    </div>
+    <div class="bg-white rounded-xl p-3 shadow-sm">
+      <div class="text-sm font-semibold mb-2">待确认预告</div>
+      <div class="flex justify-between py-1.5 border-b border-slate-100"><div class="text-xs">工商银行 · 约¥1,260</div><div class="text-[10px] text-amber-600">09-10 到账</div></div>
+      <div class="flex justify-between py-1.5"><div class="text-xs">Microsoft · 约$18</div><div class="text-[10px] text-amber-600">09-12 到账</div></div>
+    </div>`,
+  calendar: `
+    <div class="bg-white rounded-xl p-3 shadow-sm">
+      <div class="flex justify-between items-center mb-2"><span class="text-sm font-semibold">2026年9月</span><span class="text-xs text-slate-400">‹ ›</span></div>
+      <div class="grid grid-cols-7 gap-1 text-center text-[9px] text-slate-400 mb-1"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+      <div class="grid grid-cols-7 gap-1">${mCal}</div>
+      <div class="flex gap-3 mt-3 text-[10px] text-slate-500">
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-emerald-200"></span>已到账</span>
+        <span class="flex items-center gap-1"><span class="w-2.5 h-2.5 rounded bg-amber-200"></span>预告</span>
+      </div>
+    </div>`,
+  mine: `
+    <div class="bg-white rounded-xl p-4 shadow-sm flex items-center gap-3">
+      <div class="w-12 h-12 rounded-full bg-blue-100 text-blue-900 flex items-center justify-center font-bold text-lg">D</div>
+      <div><div class="text-sm font-semibold">demo@xi.com</div><div class="text-[10px] text-slate-400">数据按用户隔离 · 仅本人可见</div></div>
+    </div>
+    <div class="bg-white rounded-xl shadow-sm divide-y divide-slate-100 text-sm">
+      <div class="flex justify-between items-center p-3"><span>🏦 账户管理</span><span class="text-slate-300">›</span></div>
+      <div class="flex justify-between items-center p-3"><span>💱 汇率设置</span><span class="text-slate-300">›</span></div>
+      <div class="flex justify-between items-center p-3"><span>📥 数据导入 / 导出</span><span class="text-slate-300">›</span></div>
+      <div class="flex justify-between items-center p-3"><span>🔔 分红提醒</span><span class="text-emerald-500 text-xs">已开启</span></div>
+    </div>
+    <button class="w-full py-3 bg-white text-red-500 rounded-xl text-sm shadow-sm" onclick="closeMobile();logout()">退出登录</button>`
+};
+
+function renderMTabbar(active) {
+  return mTabs.map(t => `
+    <div class="flex-1 py-2 cursor-pointer ${t.id === active ? 'text-blue-900 font-semibold' : 'text-slate-400'}" onclick="mGo('${t.id}')">
+      <div class="text-base leading-none">${t.icon}</div><div class="mt-0.5">${t.name}</div>
+    </div>`).join('');
+}
+function mGo(tab) {
+  document.getElementById('mTabbar').innerHTML = renderMTabbar(tab);
+  document.getElementById('mTitle').textContent = mTabs.find(t => t.id === tab).name;
+  const body = document.getElementById('mBody');
+  body.innerHTML = mView[tab];
+  body.scrollTop = 0;
+}
+mGo('overview');
+
+// ============ 持仓详情（多批次数据与渲染） ============
+const detailData = {
+  h1: { name:'贵州茅台', code:'600519', icon:'🍷', market:'A股', mc:'bg-red-50 text-red-600', currency:'CNY', cur:'¥ ', freq:'年派 1 次', account:'华泰证券',
+    price:1680.00, shares:100, unit:'股', avg:1676.00, cost:167600, year:2580.00, total:11923.16, yoc:'3.60%',
+    lots:[
+      { d:'2022-03-15', t:'买入', n:60, p:1580.00, amt:94800.00, fee:15.00, div:9295.96, note:'首次建仓' },
+      { d:'2023-09-20', t:'买入', n:40, p:1820.00, amt:72800.00, fee:12.00, div:3627.20, note:'回调加仓' }
+    ],
+    divs:[
+      { pay:'2026-08-25', ex:'2026-08-06', elig:'100 股', dps:'25.80', gross:2580.00, tax:0, net:2580.00, lots:['2022-03-15 批次 60 股 × 25.80 = ¥1,548.00','2023-09-20 批次 40 股 × 25.80 = ¥1,032.00'] },
+      { pay:'2025-06-26', ex:'2025-06-06', elig:'100 股', dps:'34.50', gross:3450.00, tax:0, net:3450.00, lots:['2022-03-15 批次 60 股 → ¥2,070.00','2023-09-20 批次 40 股 → ¥1,380.00'] },
+      { pay:'2024-06-27', ex:'2024-06-07', elig:'100 股', dps:'30.38', gross:3038.00, tax:0, net:3038.00, lots:['2022-03-15 批次 60 股 → ¥1,822.80','2023-09-20 批次 40 股 → ¥1,215.20'] },
+      { pay:'2023-06-28', ex:'2023-06-08', elig:'60 股', dps:'25.91', gross:1554.66, tax:0, net:1554.66, lots:['2022-03-15 批次 60 股 → ¥1,554.66','2023-09-20 批次尚未买入，不参与本次分红'] },
+      { pay:'2022-06-30', ex:'2022-06-10', elig:'60 股', dps:'21.675', gross:1300.50, tax:0, net:1300.50, lots:['2022-03-15 批次 60 股 → ¥1,300.50'] }
+    ] },
+  h2: { name:'Apple', code:'AAPL', icon:'📱', market:'美股', mc:'bg-blue-50 text-blue-600', currency:'USD', cur:'$ ', freq:'季派（2/5/8/11月）', account:'富途牛牛',
+    price:175.00, shares:50, unit:'股', avg:142.30, cost:7115, year:49.00, total:312.00, yoc:'0.86%',
+    lots:[
+      { d:'2021-06-20', t:'买入', n:30, p:120.50, amt:3615.00, fee:1.00, div:198.00, note:'首次建仓' },
+      { d:'2022-11-08', t:'买入', n:20, p:175.00, amt:3500.00, fee:1.00, div:114.00, note:'加仓' }
+    ],
+    divs:[
+      { pay:'2026-08-15', ex:'2026-08-11', elig:'50 股', dps:'0.48', gross:24.00, tax:2.40, net:21.60, lots:['2021-06-20 批次 30 股 → $14.40','2022-11-08 批次 20 股 → $9.60','预扣股息税 10%'] },
+      { pay:'2026-05-15', ex:'2026-05-12', elig:'50 股', dps:'0.25', gross:12.50, tax:1.25, net:11.25, lots:['2021-06-20 批次 30 股 → $7.50','2022-11-08 批次 20 股 → $5.00'] },
+      { pay:'2026-02-13', ex:'2026-02-10', elig:'50 股', dps:'0.25', gross:12.50, tax:1.25, net:11.25, lots:['2021-06-20 批次 30 股 → $7.50','2022-11-08 批次 20 股 → $5.00'] },
+      { pay:'2025-11-14', ex:'2025-11-10', elig:'50 股', dps:'0.25', gross:12.50, tax:1.25, net:11.25, lots:['2021-06-20 批次 30 股 → $7.50','2022-11-08 批次 20 股 → $5.00'] }
+    ] },
+  h3: { name:'易方达蓝筹', code:'005827', icon:'🧺', market:'基金', mc:'bg-amber-50 text-amber-600', currency:'CNY', cur:'¥ ', freq:'不定期（基金分红）', account:'天天基金',
+    price:2.18, shares:10000, unit:'份', avg:2.1460, cost:21460, year:1316.00, total:3146.00, yoc:'6.13%',
+    lots:[
+      { d:'2020-09-01', t:'买入', n:6000, p:2.15, amt:12900.00, fee:0, div:1587.60, note:'定投转一次买入' },
+      { d:'2022-06-15', t:'买入', n:4000, p:2.14, amt:8560.00, fee:0, div:1558.40, note:'下跌加仓' }
+    ],
+    divs:[
+      { pay:'2026-08-10', ex:'2026-08-06', elig:'10,000 份', dps:'0.0816', gross:816.00, tax:0, net:816.00, lots:['2020-09-01 批次 6,000 份 → ¥489.60','2022-06-15 批次 4,000 份 → ¥326.40'] },
+      { pay:'2026-01-15', ex:'2026-01-12', elig:'10,000 份', dps:'0.0500', gross:500.00, tax:0, net:500.00, lots:['2020-09-01 批次 6,000 份 → ¥300.00','2022-06-15 批次 4,000 份 → ¥200.00'] },
+      { pay:'2025-08-12', ex:'2025-08-08', elig:'10,000 份', dps:'0.0980', gross:980.00, tax:0, net:980.00, lots:['2020-09-01 批次 6,000 份 → ¥588.00','2022-06-15 批次 4,000 份 → ¥392.00'] },
+      { pay:'2024-12-16', ex:'2024-12-12', elig:'10,000 份', dps:'0.0850', gross:850.00, tax:0, net:850.00, lots:['2020-09-01 批次 6,000 份 → ¥510.00','2022-06-15 批次 4,000 份 → ¥340.00'] }
+    ] },
+  h4: { name:'工商银行', code:'601398', icon:'🏦', market:'A股', mc:'bg-red-50 text-red-600', currency:'CNY', cur:'¥ ', freq:'年派 1 次', account:'华泰证券',
+    price:5.20, shares:3000, unit:'股', avg:4.85, cost:14550, year:900.00, total:2518.00, yoc:'6.19%',
+    lots:[
+      { d:'2023-11-10', t:'买入', n:2000, p:4.82, amt:9640.00, fee:5.00, div:1678.00, note:'高股息配置' },
+      { d:'2024-07-22', t:'买入', n:1000, p:4.91, amt:4910.00, fee:3.00, div:840.00, note:'派息后加仓' }
+    ],
+    divs:[
+      { pay:'2026-07-20', ex:'2026-07-03', elig:'3,000 股', dps:'0.30', gross:900.00, tax:90.00, net:810.00, lots:['2023-11-10 批次 2,000 股 → ¥600.00','2024-07-22 批次 1,000 股 → ¥300.00'] },
+      { pay:'2025-07-18', ex:'2025-07-02', elig:'3,000 股', dps:'0.2833', gross:850.00, tax:85.00, net:765.00, lots:['2023-11-10 批次 2,000 股 → ¥566.60','2024-07-22 批次 1,000 股 → ¥283.30'] },
+      { pay:'2024-07-12', ex:'2024-06-28', elig:'2,000 股', dps:'0.384', gross:768.00, tax:76.80, net:691.20, lots:['2023-11-10 批次 2,000 股 → ¥768.00','2024-07-22 批次尚未买入，不参与本次分红'] }
+    ] },
+  h5: { name:'Microsoft', code:'MSFT', icon:'🪟', market:'美股', mc:'bg-blue-50 text-blue-600', currency:'USD', cur:'$ ', freq:'季派（3/6/9/12月）', account:'富途牛牛',
+    price:358.00, shares:30, unit:'股', avg:312.00, cost:9360, year:49.80, total:144.00, yoc:'1.06%',
+    lots:[
+      { d:'2022-01-18', t:'买入', n:10, p:310.00, amt:3100.00, fee:1.00, div:48.00, note:'首次建仓' },
+      { d:'2024-03-05', t:'买入', n:20, p:313.00, amt:6260.00, fee:1.00, div:96.00, note:'分批加仓' }
+    ],
+    divs:[
+      { pay:'2026-09-12', ex:'2026-08-20', elig:'30 股', dps:'0.60', gross:18.00, tax:1.80, net:16.20, lots:['预告 · 全额归属 30 股（尚未到账）'] },
+      { pay:'2026-06-12', ex:'2026-05-20', elig:'30 股', dps:'0.83', gross:24.90, tax:2.49, net:22.41, lots:['2022-01-18 批次 10 股 → $8.30','2024-03-05 批次 20 股 → $16.60'] },
+      { pay:'2026-03-12', ex:'2026-02-19', elig:'30 股', dps:'0.83', gross:24.90, tax:2.49, net:22.41, lots:['2022-01-18 批次 10 股 → $8.30','2024-03-05 批次 20 股 → $16.60'] },
+      { pay:'2025-12-11', ex:'2025-11-20', elig:'30 股', dps:'0.83', gross:24.90, tax:2.49, net:22.41, lots:['2022-01-18 批次 10 股 → $8.30','2024-03-05 批次 20 股 → $16.60'] }
+    ] },
+  h6: { name:'腾讯控股', code:'00700', icon:'🐧', market:'港股', mc:'bg-emerald-50 text-emerald-600', currency:'HKD', cur:'HKD ', freq:'年派 1 次', account:'富途牛牛',
+    price:415.00, shares:200, unit:'股', avg:365.00, cost:73000, year:900.00, total:1920.00, yoc:'1.23%',
+    lots:[
+      { d:'2023-05-08', t:'买入', n:100, p:320.00, amt:32000.00, fee:50.00, div:1130.00, note:'首次建仓' },
+      { d:'2024-10-10', t:'买入', n:100, p:410.00, amt:41000.00, fee:60.00, div:790.00, note:'加仓' }
+    ],
+    divs:[
+      { pay:'2026-05-20', ex:'2026-05-06', elig:'200 股', dps:'4.50', gross:900.00, tax:180.00, net:720.00, lots:['2023-05-08 批次 100 股 → HKD450.00','2024-10-10 批次 100 股 → HKD450.00','港股通红利税 20%'] },
+      { pay:'2025-05-21', ex:'2025-05-07', elig:'200 股', dps:'3.40', gross:680.00, tax:136.00, net:544.00, lots:['2023-05-08 批次 100 股 → HKD340.00','2024-10-10 批次 100 股 → HKD340.00'] },
+      { pay:'2024-05-16', ex:'2024-05-03', elig:'100 股', dps:'3.40', gross:340.00, tax:68.00, net:272.00, lots:['2023-05-08 批次 100 股 → HKD340.00','2024-10-10 批次尚未买入，不参与本次分红'] }
+    ] }
+};
+
+function fmtMoney(v) { return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+
+function openDetail(id) {
+  const d = detailData[id]; if (!d) return;
+  document.getElementById('dCrumb').textContent = d.name + ' (' + d.code + ')';
+  document.getElementById('dIcon').textContent = d.icon;
+  document.getElementById('dName').textContent = d.name;
+  document.getElementById('dCode').textContent = d.code;
+  const mk = document.getElementById('dMarket'); mk.textContent = d.market; mk.className = 'badge ' + d.mc;
+  document.getElementById('dFreq').textContent = d.freq;
+  document.getElementById('dMeta').textContent = '所属账户: ' + d.account + ' · 币种 ' + d.currency + ' · 现价 ' + d.cur + fmtMoney(d.price);
+  document.getElementById('dShares').textContent = d.shares.toLocaleString() + ' ' + d.unit;
+  document.getElementById('dAvg').textContent = d.cur + (d.avg < 10 ? d.avg.toFixed(4) : fmtMoney(d.avg));
+  document.getElementById('dCost').textContent = d.cur + fmtMoney(d.cost);
+  document.getElementById('dYear').textContent = d.cur + fmtMoney(d.year);
+  document.getElementById('dTotal').textContent = d.cur + fmtMoney(d.total);
+  document.getElementById('dYoc').textContent = 'TTM成本 ' + d.yoc;
+  document.getElementById('dLotsBody').innerHTML = d.lots.map(l => `
+    <tr>
+      <td>${l.d}</td>
+      <td><span class="badge ${l.t === '买入' ? 'bg-emerald-50 text-emerald-600' : 'bg-red-50 text-red-600'}">${l.t}</span></td>
+      <td>${l.n.toLocaleString()}</td>
+      <td>${d.cur}${l.p.toFixed(l.p < 10 ? 4 : 2)}</td>
+      <td>${d.cur}${fmtMoney(l.amt)}</td>
+      <td>${d.cur}${fmtMoney(l.fee)}</td>
+      <td class="text-emerald-600 font-medium">${d.cur}${fmtMoney(l.div)}</td>
+      <td class="text-slate-400 text-xs">${l.note || ''}</td>
+    </tr>`).join('');
+  document.getElementById('dDivsBody').innerHTML = d.divs.map(v => `
+    <tr>
+      <td>${v.pay}</td><td>${v.ex}</td><td>${v.elig}</td>
+      <td>${d.cur}${v.dps}</td>
+      <td>${d.cur}${fmtMoney(v.gross)}</td>
+      <td>${d.cur}${fmtMoney(v.tax)}</td>
+      <td class="text-emerald-600 font-semibold">${d.cur}${fmtMoney(v.net)}</td>
+    </tr>
+    <tr class="bg-slate-50/70"><td colspan="7" class="text-xs text-slate-500 py-2">
+      <span class="font-medium text-slate-600 mr-2">批次归属：</span>
+      ${v.lots.map(s => `<span class="inline-block bg-white border border-slate-200 rounded px-2 py-0.5 mr-1 mb-1">${s}</span>`).join('')}
+    </td></tr>`).join('');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-detail').classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === 'holdings'));
+  document.getElementById('pageTitle').textContent = d.name + ' · 持仓详情';
+  dSwitchTab('lots');
+  window.scrollTo(0, 0);
+}
+
+function backToHoldings() {
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-holdings').classList.add('active');
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.page === 'holdings'));
+  document.getElementById('pageTitle').textContent = '持仓管理';
+}
+
+function dSwitchTab(tab) {
+  const lotsOn = tab === 'lots';
+  document.getElementById('dTabLots').className = 'px-4 py-2 text-sm rounded-lg ' + (lotsOn ? 'bg-blue-900 text-white' : 'border border-slate-200 text-slate-600');
+  document.getElementById('dTabDivs').className = 'px-4 py-2 text-sm rounded-lg ' + (lotsOn ? 'border border-slate-200 text-slate-600' : 'bg-blue-900 text-white');
+  document.getElementById('dPaneLots').classList.toggle('hidden', !lotsOn);
+  document.getElementById('dPaneDivs').classList.toggle('hidden', lotsOn);
+}
+
+// 分红记录：展开批次归属
+function toggleDivRow(row) {
+  const det = row.nextElementSibling;
+  if (!det) return;
+  det.classList.toggle('hidden');
+  const arrow = row.querySelector('.div-arrow');
+  if (arrow) arrow.textContent = det.classList.contains('hidden') ? '▸' : '▾';
+}
+
+// 日历生成
+function renderCalendar() {
+  const grid = document.getElementById('calendarGrid');
+  if (!grid) return;
+  const firstDay = new Date(2026, 8, 1).getDay() || 7; // 周一起始
+  const daysInMonth = 30;
+  let html = '';
+  for (let i = 1; i < firstDay; i++) html += '<div></div>';
+  const paidDays = { 1: 'Apple $18', 10: '工行 ¥1260' };
+  const upcomingDays = { 12: 'MSFT $18', 18: '农行 ¥560' };
+  for (let d = 1; d <= daysInMonth; d++) {
+    let cls = 'cal-day';
+    if (paidDays[d]) cls += ' has-div';
+    else if (upcomingDays[d]) cls += ' upcoming';
+    let inner = `<div class="text-sm font-medium">${d}</div>`;
+    if (paidDays[d]) inner += `<div class="text-xs text-emerald-700 mt-1 truncate">${paidDays[d]}</div>`;
+    if (upcomingDays[d]) inner += `<div class="text-xs text-amber-700 mt-1 truncate">${upcomingDays[d]}</div>`;
+    html += `<div class="${cls}">${inner}</div>`;
+  }
+  grid.innerHTML = html;
+}
+renderCalendar();
+
+// 图表
+let charts = {};
+function initCharts() {
+  if (document.getElementById('page-dashboard').classList.contains('active')) {
+    const trend = echarts.init(document.getElementById('chartTrend'));
+    trend.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: 40, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'category', data: ['10月','11月','12月','1月','2月','3月','4月','5月','6月','7月','8月','9月'] },
+      yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+      series: [{
+        data: [1800, 2200, 3500, 800, 1200, 2800, 1500, 3200, 4100, 3600, 5200, 3420],
+        type: 'line', smooth: true, areaStyle: { opacity: 0.1 },
+        itemStyle: { color: '#1e3a8a' }, lineStyle: { width: 2 }
+      }]
+    });
+
+    const market = echarts.init(document.getElementById('chartMarket'));
+    market.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+      legend: { bottom: 0 },
+      series: [{
+        type: 'pie', radius: ['45%', '70%'],
+        data: [
+          { value: 18500, name: 'A股', itemStyle: { color: '#ef4444' } },
+          { value: 6200, name: '美股', itemStyle: { color: '#3b82f6' } },
+          { value: 2800, name: '基金', itemStyle: { color: '#f59e0b' } },
+          { value: 1150, name: '港股', itemStyle: { color: '#10b981' } }
+        ],
+        label: { show: true, formatter: '{b}\n{d}%' }
+      }]
+    });
+    const fc = echarts.init(document.getElementById('chartForecast'));
+    fc.setOption({
+      tooltip: { trigger: 'axis' },
+      legend: { data: ['已公告预案', '按历史推算'], top: 0 },
+      grid: { left: 50, right: 20, top: 30, bottom: 30 },
+      xAxis: { type: 'category', data: ['10月','11月','12月','1月','2月','3月','4月','5月','6月','7月','8月','9月'] },
+      yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+      series: [
+        { name: '已公告预案', type: 'bar', stack: 'f', itemStyle: { color: '#f59e0b' }, data: [1278, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+        { name: '按历史推算', type: 'bar', stack: 'f', itemStyle: { color: '#1e3a8a', borderRadius: [4,4,0,0] }, data: [0, 520, 850, 1810, 300, 640, 0, 1450, 3450, 900, 620, 0] }
+      ]
+    });
+    charts.trend = trend; charts.market = market; charts.fc = fc;
+  }
+
+  if (document.getElementById('page-stats').classList.contains('active')) {
+    const year = echarts.init(document.getElementById('chartYear'));
+    year.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'category', data: ['2020','2021','2022','2023','2024','2025','2026'] },
+      yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+      series: [{
+        data: [3200, 8500, 12800, 18600, 22400, 25450, 28650],
+        type: 'bar', itemStyle: { color: '#1e3a8a', borderRadius: [4,4,0,0] },
+        label: { show: true, position: 'top', formatter: '¥{c}' }
+      }]
+    });
+
+    const mbar = echarts.init(document.getElementById('chartMarketBar'));
+    mbar.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      xAxis: { type: 'category', data: ['A股','美股','基金','港股'] },
+      yAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+      series: [{
+        data: [48500, 16200, 8800, 3200],
+        type: 'bar',
+        itemStyle: { color: function(p){ return ['#ef4444','#3b82f6','#f59e0b','#10b981'][p.dataIndex]; }, borderRadius: [4,4,0,0] }
+      }]
+    });
+
+    const top = echarts.init(document.getElementById('chartTop'));
+    top.setOption({
+      tooltip: { trigger: 'axis' },
+      grid: { left: 90, right: 30, top: 20, bottom: 30 },
+      xAxis: { type: 'value', axisLabel: { formatter: '¥{value}' } },
+      yAxis: { type: 'category', data: ['中国神华','工商银行','贵州茅台','农业银行','招商银行','Apple','MSFT','易方达蓝筹','五粮液','长江电力'] },
+      series: [{
+        data: [2940, 2520, 2580, 1860, 1620, 312, 144, 2448, 960, 780],
+        type: 'bar', itemStyle: { color: '#059669', borderRadius: [0,4,4,0] }
+      }]
+    });
+    const yld = echarts.init(document.getElementById('chartYield'));
+    yld.setOption({
+      tooltip: { trigger: 'axis', valueFormatter: v => v + '%' },
+      legend: { data: ['股息率(TTM成本)', '股息率(现价)'], top: 0 },
+      grid: { left: 40, right: 20, top: 30, bottom: 30 },
+      xAxis: { type: 'category', data: ['工商银行','易方达蓝筹','贵州茅台','腾讯控股','Apple','MSFT'] },
+      yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+      series: [
+        { name: '股息率(TTM成本)', type: 'bar', itemStyle: { color: '#059669', borderRadius: [4,4,0,0] }, data: [6.19, 6.13, 3.60, 1.23, 0.86, 1.06], label: { show: true, position: 'top', formatter: '{c}%' } },
+        { name: '股息率(现价)', type: 'bar', itemStyle: { color: '#94a3b8', borderRadius: [4,4,0,0] }, data: [8.08, 5.20, 1.54, 0.98, 1.10, 0.77] }
+      ]
+    });
+
+    const fq = echarts.init(document.getElementById('chartFreq'));
+    fq.setOption({
+      tooltip: { trigger: 'item', formatter: '{b}: {c} 只 ({d}%)' },
+      legend: { bottom: 0 },
+      series: [{
+        type: 'pie', radius: ['45%', '70%'],
+        data: [
+          { value: 6, name: '季派', itemStyle: { color: '#3b82f6' } },
+          { value: 9, name: '年派', itemStyle: { color: '#1e3a8a' } },
+          { value: 5, name: '半年派', itemStyle: { color: '#10b981' } },
+          { value: 2, name: '月派', itemStyle: { color: '#f59e0b' } },
+          { value: 2, name: '不定期', itemStyle: { color: '#94a3b8' } }
+        ],
+        label: { formatter: '{b}\n{c} 只' }
+      }]
+    });
+    charts.year = year; charts.mbar = mbar; charts.top = top; charts.yld = yld; charts.fq = fq;
+  }
+}
+initCharts();
+
+window.addEventListener('resize', () => Object.values(charts).forEach(c => c && c.resize()));
+</script>
+</body>
+</html>

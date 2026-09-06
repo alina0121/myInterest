@@ -1,0 +1,26 @@
+# Python（后端）
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node / uni-app（前端）
+node_modules/
+dist/
+unpackage/
+.hbuilderx/
+
+# 数据与密钥
+backend/data/
+*.db
+backups/
+.env
+.env.*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
