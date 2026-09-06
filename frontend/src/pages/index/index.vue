@@ -1,5 +1,8 @@
 <template>
   <view class="page">
+    <!-- #ifdef H5 -->
+    <WebLayout title="总览看板" />
+    <!-- #endif -->
     <!-- 顶部欢迎条 -->
     <view class="header">
       <view>
@@ -80,6 +83,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { apiSummary, apiMonthlyTrend, apiDividends } from '@/api'
 import { userStore } from '@/store/user'
 import { currencyMap } from '@/utils/constants'
+import WebLayout from '@/components/WebLayout.vue'
 
 const user = computed(() => userStore.user)
 const summary = ref({})
@@ -174,4 +178,15 @@ function goHolding(id) { uni.navigateTo({ url: '/pages/holdings/detail?id=' + id
 .div-name { font-size: 28rpx; font-weight: 500; }
 .div-sub { font-size: 22rpx; color: #94a3b8; margin-top: 6rpx; }
 .div-amt { text-align: right; font-size: 28rpx; }
+
+/* #ifdef H5 */
+/* 桌面端：4 列统计卡、双列内容区 */
+@media (min-width: 768px) {
+  .page { padding: 32rpx 48rpx 60rpx; }
+  .header { border-radius: 16rpx; margin: 0 0 24rpx; padding: 36rpx 40rpx 40rpx; }
+  .stat-grid { margin: 0; }
+  .stat-card { width: calc(25% - 24rpx); }
+  .section-title { margin: 32rpx 0 16rpx; }
+}
+/* #endif */
 </style>

@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <!-- #ifdef H5 --><WebLayout title="我的" subtitle="账户、汇率、提醒与数据" /><!-- #endif -->
     <!-- 用户卡 -->
     <view class="profile">
       <view class="avatar">{{ (user?.nickname || user?.username || '投')[0] }}</view>
@@ -62,6 +63,7 @@ import { computed, reactive, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { apiRates, apiSettings, apiSaveSettings } from '@/api'
 import { userStore, clearAuth } from '@/store/user'
+import WebLayout from '@/components/WebLayout.vue'
 
 const user = computed(() => userStore.user)
 const rates = ref({})
@@ -126,4 +128,10 @@ function logout() {
 .r-cur { color: #64748b; }
 .r-val { font-weight: 600; }
 .footer { text-align: center; font-size: 22rpx; padding: 20rpx 0 60rpx; }
+
+/* #ifdef H5 */
+@media (min-width: 768px) {
+  .page { padding: 32rpx 48rpx 60rpx; max-width: 800px; margin: 0 auto; }
+}
+/* #endif */
 </style>

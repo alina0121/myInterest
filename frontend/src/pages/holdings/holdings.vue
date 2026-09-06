@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <!-- #ifdef H5 --><WebLayout title="持仓管理" subtitle="点击行查看买入批次与分红归属" /><!-- #endif -->
     <!-- 搜索 + 市场筛选 -->
     <view class="filter-bar">
       <input class="search" v-model="keyword" placeholder="搜索代码 / 名称" @confirm="load" />
@@ -59,6 +60,7 @@ import { ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { apiHoldings } from '@/api'
 import { MARKETS, marketMap, currencyMap } from '@/utils/constants'
+import WebLayout from '@/components/WebLayout.vue'
 
 const list = ref([])
 const keyword = ref('')
@@ -120,4 +122,13 @@ onShow(load)
   border-radius: 50%; text-align: center; line-height: 96rpx; font-size: 60rpx;
   box-shadow: 0 8rpx 24rpx rgba(22,104,220,0.4);
 }
+
+/* #ifdef H5 */
+/* 桌面端：持仓卡片双列、隐藏浮动按钮（用顶部栏操作） */
+@media (min-width: 768px) {
+  .page { padding: 32rpx 48rpx 60rpx; }
+  .h-card { display: inline-block; width: calc(50% - 24rpx); margin: 12rpx; vertical-align: top; box-sizing: border-box; }
+  .fab { display: none; }
+}
+/* #endif */
 </style>

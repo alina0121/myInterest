@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <!-- #ifdef H5 --><WebLayout title="分红记录" subtitle="点击行展开批次归属明细" /><!-- #endif -->
     <!-- 状态筛选 -->
     <scroll-view scroll-x class="chips" :show-scrollbar="false">
       <view :class="['chip', status === '' ? 'on' : '']" @click="setStatus('')">全部</view>
@@ -59,6 +60,7 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { apiDividends } from '@/api'
 import { marketMap, currencyMap } from '@/utils/constants'
+import WebLayout from '@/components/WebLayout.vue'
 
 const list = ref([])
 const total = ref(0)
@@ -114,4 +116,11 @@ onShow(load)
 .alloc { margin-top: 18rpx; background: #f8fafc; border-radius: 12rpx; padding: 18rpx 20rpx; }
 .alloc-title { font-size: 24rpx; font-weight: 600; color: #475569; margin-bottom: 10rpx; }
 .alloc-row { display: flex; justify-content: space-between; font-size: 24rpx; color: #64748b; padding: 6rpx 0; }
+
+/* #ifdef H5 */
+@media (min-width: 768px) {
+  .page { padding: 32rpx 48rpx 60rpx; }
+  .d-card { display: inline-block; width: calc(50% - 24rpx); margin: 12rpx; vertical-align: top; box-sizing: border-box; }
+}
+/* #endif */
 </style>

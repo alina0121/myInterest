@@ -1,5 +1,6 @@
 <template>
   <view class="page">
+    <!-- #ifdef H5 --><WebLayout title="分红日历" subtitle="一眼看清每月到账节奏" /><!-- #endif -->
     <!-- 月份切换 -->
     <view class="nav">
       <view class="nav-btn" @click="prev">‹</view>
@@ -60,6 +61,7 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { apiCalendar } from '@/api'
 import { currencyMap } from '@/utils/constants'
+import WebLayout from '@/components/WebLayout.vue'
 
 const now = new Date()
 const year = ref(now.getFullYear())
@@ -129,4 +131,10 @@ onShow(load)
 .day-row { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 0; border-bottom: 1rpx solid #f1f5f9; }
 .day-row:last-child { border-bottom: none; }
 .dr-name { font-size: 28rpx; font-weight: 500; }
+
+/* #ifdef H5 */
+@media (min-width: 768px) {
+  .page { padding: 32rpx 48rpx 60rpx; max-width: 900px; margin: 0 auto; }
+}
+/* #endif */
 </style>

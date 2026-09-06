@@ -8,6 +8,19 @@ export default {
     if (!token) {
       uni.reLaunch({ url: '/pages/login/login' })
     }
+    // H5 桌面端隐藏原生 TabBar，改用侧边栏导航
+    // #ifdef H5
+    if (window.innerWidth >= 768) {
+      setTimeout(() => uni.hideTabBar({ animation: false }), 200)
+    }
+    // #endif
+  },
+  onShow() {
+    // #ifdef H5
+    if (window.innerWidth >= 768) {
+      uni.hideTabBar({ animation: false })
+    }
+    // #endif
   },
 }
 </script>
@@ -20,6 +33,13 @@ page {
   color: #1e293b;
   font-size: 28rpx;
 }
+
+/* H5 桌面端隐藏原生 TabBar，改用侧边栏导航 */
+/* #ifdef H5 */
+@media (min-width: 768px) {
+  uni-tabbar { display: none !important; }
+}
+/* #endif */
 
 .card {
   background: #fff;

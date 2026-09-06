@@ -17,6 +17,10 @@
       "style": { "navigationBarTitleText": "我的" }
     },
     {
+      "path": "pages/stats/stats",
+      "style": { "navigationBarTitleText": "统计分析" }
+    },
+    {
       "path": "pages/login/login",
       "style": { "navigationBarTitleText": "登录" }
     },
