@@ -13,7 +13,9 @@ if BACKEND_DIR not in sys.path:
 # 必须在导入 app.* 之前设置环境变量
 _TEST_DIR = tempfile.mkdtemp(prefix="xi_test_")
 os.environ["XI_DATABASE_URL"] = f"sqlite:///{_TEST_DIR}/xi_test.db"
-os.environ["XI_FX_OFFLINE"] = "1"  # 测试不走在线汇率，用兜底值
+os.environ["XI_FX_OFFLINE"] = "1"      # 测试不走在线汇率，用兜底值
+os.environ["XI_CRAWL_OFFLINE"] = "1"   # 测试不触发真实爬虫
+os.environ["XI_SCHEDULER"] = "0"       # 测试不启动后台定时任务
 
 from fastapi.testclient import TestClient  # noqa: E402
 import pytest  # noqa: E402

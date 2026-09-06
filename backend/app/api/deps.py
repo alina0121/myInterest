@@ -24,3 +24,17 @@ def get_current_user(
     if user.status == "banned":
         raise AppError(Codes.FORBIDDEN, "账号已封禁，请联系管理员", status=403)
     return user
+
+
+def get_admin_user(user: User = Depends(get_current_user)) -> User:
+    """管理员依赖：role ∈ {admin, super_admin}（docs/04 §0.1）。"""
+    if user.role not in ("admin", "super_admin"):
+        raise AppError(Codes.FORBIDDEN, "无管理员权限", status=403)
+    return user
+
+
+def require_super_admin(user: User = Depends(get_admin_user)) -> User:
+    """超级管理员依赖：封禁/解封、汇率税率维护等敏感操作。"""
+    if user.role != "super_admin":
+        raise AppError(Codes.FORBIDDEN, "该操作仅超级管理员可执行", status=403)
+    return user

@@ -110,3 +110,56 @@ class SettingsUpdate(BaseModel):
     auto_match_schedule: Optional[int] = Field(default=None, ge=0, le=1)
     push_enabled: Optional[int] = Field(default=None, ge=0, le=1)
     wx_subscribe: Optional[int] = Field(default=None, ge=0, le=1)
+
+
+# ---------- schedules（预案，docs/04 §5.3/11.3）----------
+class ScheduleAdminCreate(BaseModel):
+    market: Market
+    code: str = Field(min_length=1, max_length=16)
+    name: str = Field(min_length=1, max_length=64)
+    ex_date: Optional[Date] = None
+    record_date: Optional[Date] = None
+    pay_date: Optional[Date] = None
+    dps: Optional[float] = Field(default=None, gt=0)
+    currency: Currency = "CNY"
+    div_type: Literal["cash", "bonus_share"] = "cash"
+    raw_title: Optional[str] = None
+
+
+class ScheduleRejectIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=200)
+
+
+# ---------- community（公告/反馈，docs/04 §十/11.5/11.6）----------
+class FeedbackCreate(BaseModel):
+    content: str = Field(min_length=1, max_length=1000)
+    contact: Optional[str] = Field(default=None, max_length=100)
+
+
+class AnnouncementCreate(BaseModel):
+    title: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1)
+    publish: bool = False
+
+
+class AnnouncementUpdate(BaseModel):
+    title: Optional[str] = Field(default=None, max_length=100)
+    content: Optional[str] = None
+    status: Optional[Literal["draft", "published", "offline"]] = None
+
+
+class FeedbackHandleIn(BaseModel):
+    status: Literal["pending", "adopted", "planned", "done", "rejected"]
+    reply: Optional[str] = Field(default=None, max_length=500)
+
+
+# ---------- admin：汇率/税率（docs/04 §11.4）----------
+class RateManualIn(BaseModel):
+    base: Literal["USD", "HKD"]
+    rate: float = Field(gt=0)
+    rate_date: Date
+
+
+class TaxRuleUpdate(BaseModel):
+    rate: Optional[float] = Field(default=None, ge=0, le=1)
+    enabled: Optional[int] = Field(default=None, ge=0, le=1)

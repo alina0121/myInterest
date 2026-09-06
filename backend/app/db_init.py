@@ -17,7 +17,15 @@ TAX_RULE_SEEDS = [
     ("bond", "债券利息", 0.00, None, None, "个人投资者暂免征收"),
 ]
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
+
+
+def create_indexes(session: Session) -> None:
+    """SQLModel 无法表达的部分唯一索引（docs/02 §6 已发布预案防重）。"""
+    session.exec(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_sch_published "
+        "ON dividend_schedules(market, code, ex_date) WHERE status = 'published'"))
+    session.commit()
 
 
 def seed_tax_rules(session: Session) -> None:
@@ -48,6 +56,7 @@ def init_db(seed_fx: bool = True) -> None:
     with Session(engine) as session:
         session.exec(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
         session.commit()
+        create_indexes(session)
         seed_tax_rules(session)
         if seed_fx:
             seed_rates_if_empty(session)

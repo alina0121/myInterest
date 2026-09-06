@@ -8,13 +8,17 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from .db_init import init_db
+from .scheduler import start as start_scheduler
 from .utils.errors import AppError, Codes
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     init_db()
+    task = start_scheduler()
     yield
+    if task:
+        task.cancel()
 
 
 app = FastAPI(title="息计 API", version="0.1.0", lifespan=lifespan)
@@ -57,16 +61,20 @@ async def validation_handler(_request: Request, exc: RequestValidationError):
 
 
 # ---------- 路由 ----------
-from .api import auth, calendar, dividends, holdings, lots, settings, stats, system  # noqa: E402
+from .api import (admin, auth, calendar, community, dividends, holdings, lots,  # noqa: E402
+                  schedules, settings, stats, system)
 
 app.include_router(auth.router)
 app.include_router(holdings.router)
 app.include_router(lots.router)
 app.include_router(dividends.router)
+app.include_router(schedules.router)
 app.include_router(stats.router)
 app.include_router(calendar.router)
 app.include_router(settings.router)
 app.include_router(system.router)
+app.include_router(community.router)
+app.include_router(admin.router)
 
 
 @app.get("/api/health")

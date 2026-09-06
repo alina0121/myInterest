@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from ..database import get_session
 from ..models import Dividend, DividendAllocation, Holding, User
 from ..schemas import ConfirmIn, DividendCreate, DividendUpdate
-from ..services import dividend_service, fx_service
+from ..services import dividend_service, fx_service, schedule_service
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.timeutil import now_str
 from .deps import get_current_user
@@ -24,7 +24,7 @@ def get_owned_dividend(session: Session, user: User, dividend_id: int) -> Divide
 def dividend_out(session: Session, d: Dividend, holding: Holding,
                  with_allocations: bool = False) -> dict:
     data = {
-        "id": d.id, "holding_id": d.holding_id,
+        "id": d.id, "holding_id": d.holding_id, "schedule_id": d.schedule_id,
         "holding_name": holding.name, "code": holding.code, "market": holding.market,
         "ex_date": d.ex_date, "record_date": d.record_date, "pay_date": d.pay_date,
         "dps": d.dps, "shares": d.eligible_shares,
@@ -95,6 +95,13 @@ def create_dividend(body: DividendCreate, session: Session = Depends(get_session
     out = dividend_out(session, d, h, True)
     out["record_date_auto"] = (body.record_date is None and h.market == "a_share")
     return ok(out)
+
+
+@router.post("/auto-match")
+def auto_match(session: Session = Depends(get_session),
+               user: User = Depends(get_current_user)):
+    """预告自动匹配：扫描已发布预案为本用户生成 pending 分红，幂等（docs/04 §4.6）。"""
+    return ok(schedule_service.auto_match(session, user_id=user.id))
 
 
 @router.get("/{dividend_id}")

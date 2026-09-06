@@ -1,0 +1,308 @@
+"""P1 测试：分红预案 + 运营后台（docs/04 §五/十一、docs/06）。
+
+覆盖：预案审核流、auto-match 幂等、upcoming 预估、公告/反馈、
+后台用户管理（封禁/重置密码）、汇率税率、操作日志、权限隔离。
+"""
+import pytest
+
+from conftest import auth, register
+
+ADMIN = {"username": "admin01", "password": "password123"}
+USER = {"username": "normal_user", "password": "password123"}
+
+
+def _make_admin(client, username="admin01"):
+    """直接注册一个用户并提升为 super_admin（测试库无外预置）。"""
+    token = register(client, username)
+    from app.database import engine
+    from app.models import User
+    from sqlmodel import Session, select
+    with Session(engine) as s:
+        u = s.exec(select(User).where(User.username == username)).first()
+        u.role = "super_admin"
+        s.add(u)
+        s.commit()
+    # 重新登录拿新 token（role 不进 token，token 仍有效）
+    r = client.post("/api/auth/login", json={"account": username, "password": "password123"})
+    assert r.json()["code"] == 0
+    return r.json()["data"]["access_token"]
+
+
+def _create_holding_with_lot(client, token, **kw):
+    body = {"market": "a_share", "code": "601398", "name": "工商银行",
+            "currency": "CNY", "freq": "annual",
+            "first_lot": {"trade_date": "2023-06-01", "shares": 3000, "price": 5.0}}
+    body.update(kw)
+    r = client.post("/api/holdings", headers=auth(token), json=body)
+    assert r.json()["code"] == 0, r.text
+    return r.json()["data"]["id"]
+
+
+# ---------- 权限隔离 ----------
+
+
+def test_normal_user_forbidden_from_admin(client):
+    token = register(client, "plain_user")
+    r = client.get("/api/admin/stats/overview", headers=auth(token))
+    assert r.status_code == 403 and r.json()["code"] == 1004
+
+
+def test_unauthenticated_admin_rejected(client):
+    r = client.get("/api/admin/stats/overview")
+    assert r.status_code == 401 and r.json()["code"] == 1002
+
+
+# ---------- 看板 ----------
+
+
+def test_admin_overview(client):
+    admin_token = _make_admin(client)
+    r = client.get("/api/admin/stats/overview", headers=auth(admin_token)).json()
+    assert r["code"] == 0
+    d = r["data"]
+    assert d["user_total"] >= 1
+    assert "schedule_pending" in d
+    assert len(d["new_users_30d"]) == 30
+
+
+# ---------- 预案审核流 ----------
+
+
+def test_schedule_approve_and_auto_match(client):
+    """管理员录入预案 → 发布 → 全体用户 auto-match 生成 pending 分红。"""
+    admin_token = _make_admin(client, "admin_sch")
+    user_token = register(client, "user_sch")
+    hid = _create_holding_with_lot(client, user_token)
+
+    # 管理员录入预案（pending）
+    r = client.post("/api/admin/schedules", headers=auth(admin_token), json={
+        "market": "a_share", "code": "601398", "name": "工商银行",
+        "ex_date": "2026-09-10", "record_date": "2026-09-09",
+        "pay_date": "2026-09-10", "dps": 0.42}).json()
+    assert r["code"] == 0
+    sid = r["data"]["id"]
+    assert r["data"]["status"] == "pending"
+
+    # 发布 → 后台 auto-match 已为该用户生成 pending 分红
+    r = client.post(f"/api/admin/schedules/{sid}/approve", headers=auth(admin_token)).json()
+    assert r["code"] == 0 and r["data"]["status"] == "published"
+
+    # 手动触发 auto-match 应为幂等（已存在 → matched=0）
+    r = client.post("/api/dividends/auto-match", headers=auth(user_token)).json()
+    assert r["code"] == 0
+    assert r["data"]["matched"] == 0
+
+    # 分红列表应存在 status=pending 的记录（由后台 auto-match 生成）
+    divs = client.get("/api/dividends?status=pending", headers=auth(user_token)).json()
+    assert divs["data"]["total"] >= 1
+    pending = [d for d in divs["data"]["items"] if d["schedule_id"] is not None]
+    assert len(pending) == 1
+    assert pending[0]["shares"] == 3000
+    assert pending[0]["source"] == "auto_schedule"
+
+
+def test_schedule_reject(client):
+    admin_token = _make_admin(client, "admin_rej")
+    r = client.post("/api/admin/schedules", headers=auth(admin_token), json={
+        "market": "a_share", "code": "600000", "name": "浦发银行",
+        "ex_date": "2026-09-15", "dps": 0.30}).json()
+    sid = r["data"]["id"]
+    r = client.post(f"/api/admin/schedules/{sid}/reject", headers=auth(admin_token),
+                    json={"reason": "dps 与公告原文不符"}).json()
+    assert r["code"] == 0 and r["data"]["status"] == "rejected"
+    assert r["data"]["reject_reason"] == "dps 与公告原文不符"
+
+
+def test_schedule_duplicate_publish_blocked(client):
+    """同一标的同一除权日不可重复发布（docs/04 错误码 5001）。"""
+    admin_token = _make_admin(client, "admin_dup")
+    # 第一条发布
+    r1 = client.post("/api/admin/schedules", headers=auth(admin_token), json={
+        "market": "a_share", "code": "600036", "name": "招商银行",
+        "ex_date": "2026-07-10", "dps": 1.50}).json()
+    client.post(f"/api/admin/schedules/{r1['data']['id']}/approve", headers=auth(admin_token))
+    # 第二条同除权日 → 发布时拦截
+    r2 = client.post("/api/admin/schedules", headers=auth(admin_token), json={
+        "market": "a_share", "code": "600036", "name": "招商银行",
+        "ex_date": "2026-07-10", "dps": 1.55}).json()
+    r3 = client.post(f"/api/admin/schedules/{r2['data']['id']}/approve",
+                     headers=auth(admin_token))
+    assert r3.json()["code"] == 5001
+
+
+def test_schedule_list_filters(client):
+    admin_token = _make_admin(client, "admin_filter")
+    client.post("/api/admin/schedules", headers=auth(admin_token), json={
+        "market": "us_stock", "code": "AAPL", "name": "Apple",
+        "ex_date": "2026-08-15", "dps": 0.25, "currency": "USD"})
+    r = client.get("/api/admin/schedules?market=us_stock", headers=auth(admin_token)).json()
+    assert r["data"]["total"] >= 1
+    assert r["data"]["status_counts"]["pending"] >= 1
+
+
+# ---------- upcoming 即将到账 ----------
+
+
+def test_upcoming_returns_holdings_only(client):
+    admin_token = _make_admin(client, "admin_up")
+    user_token = register(client, "user_up")
+    _create_holding_with_lot(client, user_token)
+    # 发布一条 AAPL（用户未持有）+ 一条 601398（持有）
+    for code, name in (("AAPL", "Apple"), ("601398", "工商银行")):
+        r = client.post("/api/admin/schedules", headers=auth(admin_token), json={
+            "market": "a_share" if code == "601398" else "us_stock",
+            "code": code, "name": name,
+            "ex_date": "2026-09-10", "pay_date": "2026-09-10", "dps": 0.42,
+            "currency": "CNY" if code == "601398" else "USD"}).json()
+        client.post(f"/api/admin/schedules/{r['data']['id']}/approve", headers=auth(admin_token))
+
+    r = client.get("/api/schedules/upcoming", headers=auth(user_token)).json()
+    assert r["code"] == 0
+    items = r["data"]["items"]
+    codes = {i["code"] for i in items}
+    assert "601398" in codes and "AAPL" not in codes
+    icbc = next(i for i in items if i["code"] == "601398")
+    assert icbc["my_shares"] == 3000
+    assert icbc["est_gross"] == 3000 * 0.42
+
+
+# ---------- 公告与反馈 ----------
+
+
+def test_announcement_lifecycle(client):
+    admin_token = _make_admin(client, "admin_ann")
+    # 创建草稿
+    r = client.post("/api/admin/announcements", headers=auth(admin_token),
+                    json={"title": "版本更新", "content": "支持港股通"}).json()
+    assert r["data"]["status"] == "draft"
+    aid = r["data"]["id"]
+    # 用户端看不到草稿
+    r = client.get("/api/announcements")
+    assert r.json()["data"]["items"] == []
+    # 发布
+    client.patch(f"/api/admin/announcements/{aid}", headers=auth(admin_token),
+                 json={"status": "published"}).json()
+    r = client.get("/api/announcements").json()
+    assert len(r["data"]["items"]) == 1 and r["data"]["items"][0]["title"] == "版本更新"
+
+
+def test_feedback_submit_and_handle(client):
+    admin_token = _make_admin(client, "admin_fb")
+    user_token = register(client, "user_fb")
+    # 用户提交反馈
+    r = client.post("/api/feedback", headers=auth(user_token),
+                    json={"content": "建议支持港股通", "contact": "wx_xxx"}).json()
+    assert r["code"] == 0 and r["data"]["status"] == "pending"
+    fid = r["data"]["id"]
+    # 我的反馈可见
+    mine = client.get("/api/feedback/me", headers=auth(user_token)).json()
+    assert mine["data"]["items"][0]["id"] == fid
+    # 管理员处理
+    r = client.patch(f"/api/admin/feedback/{fid}", headers=auth(admin_token),
+                     json={"status": "adopted", "reply": "下个版本支持"}).json()
+    assert r["code"] == 0 and r["data"]["status"] == "adopted"
+
+
+# ---------- 后台用户管理 ----------
+
+
+def test_admin_user_management(client):
+    admin_token = _make_admin(client, "admin_um")
+    user_token = register(client, "target_user")
+    me = client.get("/api/auth/me", headers=auth(user_token)).json()["data"]
+    uid = me["id"]
+
+    # 列表
+    r = client.get("/api/admin/users?keyword=target", headers=auth(admin_token)).json()
+    assert r["data"]["total"] == 1
+    assert r["data"]["items"][0]["email"] is not None  # 脱敏后非空
+
+    # 只读数据
+    r = client.get(f"/api/admin/users/{uid}/data", headers=auth(admin_token)).json()
+    assert r["code"] == 0 and r["data"]["user"]["id"] == uid
+
+    # 重置密码
+    r = client.post(f"/api/admin/users/{uid}/reset-password",
+                    headers=auth(admin_token)).json()
+    assert "temp_password" in r["data"]
+    temp = r["data"]["temp_password"]
+    login = client.post("/api/auth/login", json={"account": "target_user", "password": temp})
+    assert login.json()["code"] == 0
+
+    # 封禁 → 登录被拒
+    client.post(f"/api/admin/users/{uid}/ban", headers=auth(admin_token))
+    banned_login = client.post("/api/auth/login",
+                               json={"account": "target_user", "password": temp})
+    assert banned_login.json()["code"] == 1004
+    # 解封
+    client.post(f"/api/admin/users/{uid}/unban", headers=auth(admin_token))
+    ok_login = client.post("/api/auth/login",
+                           json={"account": "target_user", "password": temp})
+    assert ok_login.json()["code"] == 0
+
+
+def test_admin_cannot_ban_self(client):
+    admin_token = _make_admin(client, "admin_self")
+    me = client.get("/api/auth/me", headers=auth(admin_token)).json()["data"]
+    r = client.post(f"/api/admin/users/{me['id']}/ban", headers=auth(admin_token))
+    assert r.json()["code"] == 1001  # 422 校验失败
+
+
+# ---------- 汇率与税率 ----------
+
+
+def test_admin_rates_crud(client):
+    admin_token = _make_admin(client, "admin_rate")
+    r = client.post("/api/admin/rates", headers=auth(admin_token),
+                    json={"base": "USD", "rate": 7.1500, "rate_date": "2026-09-06"}).json()
+    assert r["code"] == 0 and r["data"]["source"] == "manual"
+    # 列表
+    r = client.get("/api/admin/rates?base=USD", headers=auth(admin_token)).json()
+    assert r["data"]["total"] >= 1
+
+
+def test_admin_tax_rules_list_and_update(client):
+    admin_token = _make_admin(client, "admin_tax")
+    r = client.get("/api/admin/tax-rules", headers=auth(admin_token)).json()
+    assert r["code"] == 0 and len(r["data"]["items"]) >= 5
+    rule_id = r["data"]["items"][0]["id"]
+    # 禁用
+    r = client.put(f"/api/admin/tax-rules/{rule_id}", headers=auth(admin_token),
+                   json={"enabled": 0}).json()
+    assert r["code"] == 0 and r["data"]["enabled"] == 0
+
+
+def test_normal_rate_uses_admin_rate(client):
+    """管理员录入汇率后，用户端 /api/rates 能查到。"""
+    admin_token = _make_admin(client, "admin_rate2")
+    client.post("/api/admin/rates", headers=auth(admin_token),
+                json={"base": "USD", "rate": 7.2000, "rate_date": "2026-09-06"})
+    user_token = register(client, "user_rate")
+    r = client.get("/api/rates?date=2026-09-06", headers=auth(user_token)).json()
+    assert r["code"] == 0
+    assert abs(r["data"]["rates"]["USD"] - 7.2) < 0.01
+
+
+# ---------- 操作日志 ----------
+
+
+def test_admin_logs_recorded(client):
+    admin_token = _make_admin(client, "admin_log")
+    client.post("/api/admin/users/99999/reset-password", headers=auth(admin_token))
+    client.post("/api/admin/schedules", headers=auth(admin_token), json={
+        "market": "a_share", "code": "600519", "name": "贵州茅台",
+        "ex_date": "2026-06-30", "dps": 25.80})
+    r = client.get("/api/admin/logs", headers=auth(admin_token)).json()
+    actions = {i["action"] for i in r["data"]["items"]}
+    assert "schedule.create" in actions
+
+
+# ---------- 爬虫（离线模式）----------
+
+
+def test_crawl_offline_returns_zero(client):
+    admin_token = _make_admin(client, "admin_crawl")
+    r = client.post("/api/admin/schedules/crawl", headers=auth(admin_token)).json()
+    assert r["code"] == 0
+    assert r["data"]["fetched"] == 0
+    assert "离线" in r["data"]["message"]
