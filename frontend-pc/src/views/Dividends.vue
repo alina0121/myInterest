@@ -67,6 +67,11 @@
         <el-table-column label="来源" width="80">
           <template #default="{ row }">{{ sourceText(row.source) }}</template>
         </el-table-column>
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ row }">
+            <el-button link type="primary" @click.stop>编辑</el-button>
+          </template>
+        </el-table-column>
       </el-table>
       <div class="pager">
         <el-pagination background layout="prev, pager, next" :total="total"

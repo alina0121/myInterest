@@ -47,9 +47,12 @@
         <el-table-column label="派息频率" width="90" align="center">
           <template #default="{ row }">{{ freqMap[row.freq] || '未知' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="90" fixed="right">
+        <el-table-column label="操作" width="140" fixed="right">
           <template #default="{ row }">
             <el-button link type="primary" @click.stop="goDetail(row)">查看批次</el-button>
+            <el-popconfirm title="删除该持仓及其所有批次和分红记录？" @confirm="delHolding(row)">
+              <template #reference><el-button link type="danger" @click.stop>删除</el-button></template>
+            </el-popconfirm>
           </template>
         </el-table-column>
       </el-table>
@@ -115,7 +118,7 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { apiHoldings, apiCreateHolding } from '../api'
+import { apiHoldings, apiCreateHolding, apiDeleteHolding } from '../api'
 import { MARKETS, marketMap, freqMap, FREQS, fmt, fmtCNY, currencyMap } from '../utils/constants'
 
 const router = useRouter()
@@ -172,6 +175,14 @@ async function save() {
 }
 
 function goDetail(row) { router.push(`/holdings/${row.id}`) }
+
+async function delHolding(row) {
+  try {
+    await apiDeleteHolding(row.id)
+    ElMessage.success('持仓已删除')
+    load()
+  } catch (e) { /* toast 已统一 */ }
+}
 
 onMounted(load)
 </script>

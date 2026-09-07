@@ -8,6 +8,8 @@
         <el-button circle @click="nextMonth"><el-icon><ArrowRight /></el-icon></el-button>
       </div>
       <div class="month-summary">
+        <span class="legend-item"><span class="legend-dot confirmed"></span>已到账</span>
+        <span class="legend-item"><span class="legend-dot pending"></span>预告</span>
         <span>本月已确认：<b class="text-emerald">{{ fmtCNY(cal.month_confirmed_cny) }}</b></span>
         <span>待确认：<b class="text-amber">{{ fmtCNY(cal.month_pending_cny) }}</b></span>
       </div>
@@ -33,23 +35,30 @@
       </div>
     </div>
 
-    <!-- 本月分红流水 -->
+    <!-- 本月分红流水（时间线） -->
     <div class="card mt20">
-      <h3>本月分红流水</h3>
+      <div class="flow-head">
+        <h3>本月分红流水</h3>
+        <span class="text-muted flow-summary">
+          已到账 {{ fmtCNY(cal.month_confirmed_cny) }} · 预告 {{ fmtCNY(cal.month_pending_cny) }}
+        </span>
+      </div>
       <div v-if="!flowItems.length" class="empty-tip">本月暂无分红</div>
-      <div v-for="(f, i) in flowItems" :key="i" :class="['flow-row', i < flowItems.length - 1 ? 'bordered' : '']">
-        <div class="flow-date">
-          <div class="fd-day">{{ f.day }}日</div>
-        </div>
-        <div class="flow-main">
-          <div class="bold">{{ f.holding_name }} ({{ f.code }})</div>
-          <div class="text-muted">{{ fmt(f.shares) }} 股 × {{ sym(f.currency) }}{{ fmt(f.dps) }} · 税 {{ fmt(f.tax) }}</div>
-        </div>
-        <div class="text-right">
-          <div :class="f.status === 'confirmed' ? 'text-emerald' : 'text-amber'" style="font-weight: 600">
-            {{ f.status === 'confirmed' ? '+' : '约 ' }}{{ sym(f.currency) }}{{ fmt(f.net) }}
+      <div class="timeline">
+        <div v-for="(f, i) in flowItems" :key="i" class="tl-item">
+          <div class="tl-marker">
+            <span :class="['tl-dot', f.status === 'confirmed' ? 'confirmed' : 'pending']"></span>
+            <span v-if="i < flowItems.length - 1" class="tl-line"></span>
           </div>
-          <div class="text-muted">{{ f.status === 'confirmed' ? '已到账' : '待确认' }}</div>
+          <div class="tl-content">
+            <div class="tl-main">
+              <div class="bold">{{ f.holding_name }} ({{ f.code }})</div>
+              <div class="text-muted">{{ f.day }}日 · {{ fmt(f.shares) }} 股 × {{ sym(f.currency) }}{{ fmt(f.dps) }} · {{ f.status === 'confirmed' ? '已到账' : '预告' }}</div>
+            </div>
+            <div :class="['tl-amt', f.status === 'confirmed' ? 'text-emerald' : 'text-amber']">
+              {{ f.status === 'confirmed' ? '+' : '约 ' }}{{ sym(f.currency) }}{{ fmt(f.net) }}
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -146,4 +155,21 @@ onMounted(load)
 .flow-main { flex: 1; }
 .text-right { text-align: right; }
 .empty-tip { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
+/* 时间线 */
+.flow-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.flow-head h3 { margin: 0; }
+.flow-summary { font-size: 12px; }
+.timeline { padding-left: 4px; }
+.tl-item { display: flex; gap: 16px; }
+.tl-marker { display: flex; flex-direction: column; align-items: center; }
+.tl-dot { width: 12px; height: 12px; border-radius: 50%; margin-top: 6px; flex: none; }
+.tl-dot.confirmed { background: #10b981; }
+.tl-dot.pending { background: #f59e0b; }
+.tl-line { width: 1px; flex: 1; background: #e2e8f0; margin: 4px 0; }
+.tl-content { flex: 1; display: flex; justify-content: space-between; align-items: flex-start; padding-bottom: 16px; }
+.tl-main .bold { font-size: 14px; font-weight: 500; }
+.tl-main .text-muted { font-size: 12px; margin-top: 2px; }
+.tl-amt { font-size: 14px; font-weight: 600; }
+.text-emerald { color: #059669; }
+.text-amber { color: #d97706; }
 </style>

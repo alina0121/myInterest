@@ -1,5 +1,16 @@
 """息计 API 入口（docs/04 §0）。开发模式：uvicorn app.main:app --reload --port 8000"""
+import os
 from contextlib import asynccontextmanager
+from pathlib import Path
+
+# 启动时加载 backend/.env（无 python-dotenv 依赖，仅 KEY=VALUE 行）
+_env_file = Path(__file__).resolve().parent.parent / ".env"
+if _env_file.exists():
+    for _line in _env_file.read_text(encoding="utf-8").splitlines():
+        _line = _line.strip()
+        if _line and not _line.startswith("#") and "=" in _line:
+            _k, _, _v = _line.partition("=")
+            os.environ.setdefault(_k.strip(), _v.strip())
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError

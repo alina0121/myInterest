@@ -22,7 +22,7 @@
       <div class="card stat-card">
         <div class="stat-label">持仓数量</div>
         <div class="stat-value">{{ summary.holding_count || 0 }} 只</div>
-        <div class="stat-foot text-muted">下月预计 {{ fmtCNY(summary.next_month_forecast_cny) }}</div>
+        <div class="stat-foot text-muted">{{ marketDist }}</div>
       </div>
     </div>
 
@@ -44,6 +44,7 @@
         <div class="text-muted">TTM 分红（近 12 个月已到账）</div>
         <div class="ttm-val text-emerald">{{ fmtCNY(summary.year_dividend_cny) }}</div>
         <div class="text-muted">下月预告 {{ fmtCNY(summary.next_month_forecast_cny) }}</div>
+        <div class="text-muted" v-if="summary.year_dividend_cny > 0">折合月均 {{ fmtCNY(summary.year_dividend_cny / 12) }}</div>
       </div>
     </div>
 
@@ -126,6 +127,14 @@ const mk = useEchart(marketEl, marketOpt)
 const growth = computed(() => {
   const g = summary.value.year_growth
   return g === null || g === undefined ? null : Number(g)
+})
+
+const marketDist = computed(() => {
+  const ms = summary.value.market_dist
+  if (!ms) return ''
+  return Object.entries(ms)
+    .map(([k, v]) => `${marketMap[k]?.label || k} ${v}`)
+    .join(' · ')
 })
 
 const freqRows = computed(() => {

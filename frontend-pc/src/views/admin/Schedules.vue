@@ -39,9 +39,14 @@
         <el-table-column label="来源" width="90">
           <template #default="{ row }">{{ sourceText(row.source) }}</template>
         </el-table-column>
-        <el-table-column label="置信度" width="90" align="center">
+        <el-table-column label="置信度" width="130" align="center">
           <template #default="{ row }">
-            <span :class="confidenceClass(row.confidence)">{{ (row.confidence * 100).toFixed(0) }}%</span>
+            <div class="conf-cell">
+              <div class="conf-bar">
+                <div class="conf-fill" :class="confClass(row.confidence)" :style="{ width: (row.confidence * 100) + '%' }"></div>
+              </div>
+              <span :class="confidenceClass(row.confidence)">{{ (row.confidence * 100).toFixed(0) }}%</span>
+            </div>
           </template>
         </el-table-column>
         <el-table-column label="状态" width="90">
@@ -58,6 +63,7 @@
       </el-table>
       <div v-if="!list.length && !loading" class="empty-tip">该状态下暂无预案</div>
     </div>
+    <p class="conf-rule">🕷️ 置信度规则：交易所/公司公告原文 &gt;90% 自动待发布；财经媒体转载 70–90% 待审核；用户提交 &lt;70% 必须人工核对。</p>
 
     <!-- 手动录入 -->
     <el-dialog v-model="crawlDlg" title="手动录入分红预案" width="560">
@@ -132,6 +138,11 @@ function confidenceClass(c) {
   if (c >= 0.85) return 'text-emerald'
   if (c >= 0.7) return 'text-amber'
   return 'conf-low'
+}
+function confClass(c) {
+  if (c >= 0.85) return 'fill-high'
+  if (c >= 0.7) return 'fill-mid'
+  return 'fill-low'
 }
 
 async function load() {
@@ -211,4 +222,14 @@ onMounted(load)
 .conf-low { color: #ef4444; }
 .empty-tip { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+/* 置信度进度条 */
+.conf-cell { display: flex; align-items: center; gap: 6px; }
+.conf-bar { width: 56px; height: 6px; background: #f1f5f9; border-radius: 4px; overflow: hidden; }
+.conf-fill { height: 100%; border-radius: 4px; }
+.fill-high { background: #10b981; }
+.fill-mid { background: #f59e0b; }
+.fill-low { background: #ef4444; }
+.text-emerald { color: #059669; }
+.text-amber { color: #d97706; }
+.conf-rule { font-size: 12px; color: #94a3b8; margin-top: 12px; }
 </style>

@@ -1,87 +1,97 @@
 <template>
   <div>
-    <!-- 年度分红总额 -->
-    <div class="card">
-      <div class="card-head">
+    <!-- 年度分红总额 + 各市场累计分红 -->
+    <div class="row-grid">
+      <div class="card">
         <h3>年度分红总额</h3>
-        <span class="text-muted">税后折人民币</span>
+        <div ref="yearEl" class="chart-h300"></div>
       </div>
-      <div ref="yearEl" class="chart-h300"></div>
-    </div>
-
-    <!-- 市场占比 + Top10 -->
-    <div class="row-grid mt20">
       <div class="card">
         <h3>各市场累计分红</h3>
         <div ref="marketEl" class="chart-h300"></div>
       </div>
+    </div>
+
+    <!-- Top10 + 股息率排行 -->
+    <div class="row-grid mt20">
       <div class="card">
         <h3>持仓分红贡献 Top10</h3>
         <div ref="topEl" class="chart-h300"></div>
       </div>
+      <div class="card">
+        <div class="card-head">
+          <h3>股息率排行（年化）</h3>
+        </div>
+        <el-table :data="yieldList" style="width: 100%" max-height="300">
+          <el-table-column label="持仓" min-width="140">
+            <template #default="{ row }">
+              <span class="bold">{{ row.name }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="市值" width="120" align="right">
+            <template #default="{ row }">{{ fmtCNY(row.market_value_cny) }}</template>
+          </el-table-column>
+          <el-table-column label="年分红" width="110" align="right">
+            <template #default="{ row }">{{ fmtCNY(row.year_dividend_cny) }}</template>
+          </el-table-column>
+          <el-table-column label="股息率(现价)" width="120" align="right">
+            <template #default="{ row }">
+              <span class="text-emerald bold">{{ row.yield_price ? (row.yield_price * 100).toFixed(2) + '%' : '-' }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column label="股息率(TTM成本)" width="130" align="right">
+            <template #default="{ row }">
+              <span class="text-muted">{{ (row.yoc_ttm * 100).toFixed(2) }}%</span>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="hint-text">TTM成本股息率 = 近12月每股分红 ÷ 你的加权平均成本，分批买入后成本被摊薄/抬高会实时反映</p>
+      </div>
     </div>
 
-    <!-- 股息率排行 -->
-    <div class="card mt20">
-      <div class="card-head">
-        <h3>股息率排行</h3>
-        <span class="text-muted">成本股息率 = 近12月每股分红 ÷ 平均成本</span>
+    <!-- 成本股息率 vs 现价股息率 + 派息频率分布 -->
+    <div class="row-grid mt20">
+      <div class="card">
+        <h3>成本股息率 vs 现价股息率</h3>
+        <p class="hint-text">衡量「按买入成本躺收」的真实收益率（参考 Simply Safe Dividends）</p>
+        <div ref="yieldEl" class="chart-h300"></div>
       </div>
-      <el-table :data="yieldList" style="width: 100%">
-        <el-table-column label="排名" width="70" align="center">
-          <template #default="{ $index }">
-            <span :class="['rank-num', $index < 3 ? 'rank-top' : '']">{{ $index + 1 }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="持仓" min-width="180">
-          <template #default="{ row }">
-            <span class="bold">{{ row.name }}</span>
-            <span class="text-muted" style="margin-left: 8px">{{ row.market ? (marketMap[row.market]?.label) : '' }}</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="持仓市值" width="140" align="right">
-          <template #default="{ row }">{{ fmtCNY(row.market_value_cny) }}</template>
-        </el-table-column>
-        <el-table-column label="本年分红" width="130" align="right">
-          <template #default="{ row }">{{ fmtCNY(row.year_dividend_cny) }}</template>
-        </el-table-column>
-        <el-table-column label="成本股息率" width="120" align="right">
-          <template #default="{ row }">
-            <span class="text-emerald bold">{{ (row.yoc_ttm * 100).toFixed(2) }}%</span>
-          </template>
-        </el-table-column>
-        <el-table-column label="现价股息率" width="120" align="right">
-          <template #default="{ row }">
-            {{ row.yield_price ? (row.yield_price * 100).toFixed(2) + '%' : '-' }}
-          </template>
-        </el-table-column>
-      </el-table>
-      <div v-if="!yieldList.length" class="empty-tip">暂无数据</div>
+      <div class="card">
+        <h3>派息频率分布</h3>
+        <p class="hint-text">月派越多，现金流越平滑；年派集中在特定月份</p>
+        <div ref="freqEl" class="chart-h300"></div>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
-import { apiMonthlyTrend, apiByMarket, apiTopHoldings, apiYieldRanking } from '../api'
-import { fmtCNY, marketMap } from '../utils/constants'
+import { apiMonthlyTrend, apiByMarket, apiTopHoldings, apiYieldRanking, apiHoldings } from '../api'
+import { fmtCNY, marketMap, freqMap } from '../utils/constants'
 import { useEchart } from '../utils/echart'
 
 const yearEl = ref(null)
 const marketEl = ref(null)
 const topEl = ref(null)
+const yieldEl = ref(null)
+const freqEl = ref(null)
 const yearOpt = ref({})
 const marketOpt = ref({})
 const topOpt = ref({})
+const yieldOpt = ref({})
+const freqOpt = ref({})
 const yc = useEchart(yearEl, yearOpt)
 const mc = useEchart(marketEl, marketOpt)
 const tc = useEchart(topEl, topOpt)
+const ylc = useEchart(yieldEl, yieldOpt)
+const fc = useEchart(freqEl, freqOpt)
 
 const yieldList = ref([])
 
 onMounted(async () => {
-  const [trend, market, top, yld] = await Promise.all([
-    apiMonthlyTrend('24m'), apiByMarket(), apiTopHoldings(10), apiYieldRanking(),
+  const [trend, market, top, yld, holdings] = await Promise.all([
+    apiMonthlyTrend('24m'), apiByMarket(), apiTopHoldings(10), apiYieldRanking(), apiHoldings(),
   ])
 
   // 年度聚合
@@ -103,16 +113,17 @@ onMounted(async () => {
   }
   yc.render()
 
-  // 市场占比
-  const mItems = (market.items || []).map((m) => ({
-    name: marketMap[m.market]?.label || m.market, value: Number(m.amount_cny),
-  }))
+  // 各市场累计分红（横向条形，更接近原型 bar 形态）
+  const mItems = (market.items || [])
   marketOpt.value = {
-    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
-    legend: { bottom: 0 },
+    tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
+    grid: { left: 80, right: 30, top: 20, bottom: 30 },
+    xAxis: { type: 'value' },
+    yAxis: { type: 'category', data: mItems.map((m) => marketMap[m.market]?.label || m.market) },
     series: [{
-      type: 'pie', radius: ['45%', '70%'], center: ['50%', '45%'],
-      label: { formatter: '{b}\n{d}%' }, data: mItems,
+      type: 'bar', data: mItems.map((m) => Number((m.amount_cny || 0).toFixed(2))), barMaxWidth: 24,
+      itemStyle: { color: '#3b82f6', borderRadius: [0, 6, 6, 0] },
+      label: { show: true, position: 'right', formatter: '¥{c}' },
     }],
   }
   mc.render()
@@ -131,25 +142,68 @@ onMounted(async () => {
   }
   tc.render()
 
+  // 股息率排行表格
   yieldList.value = (yld.items || []).slice(0, 10)
+
+  // 成本股息率 vs 现价股息率（双柱状图）
+  const yItems = (yld.items || []).slice(0, 10)
+  yieldOpt.value = {
+    tooltip: { trigger: 'axis', valueFormatter: (v) => (v == null ? '-' : v + '%') },
+    legend: { data: ['股息率(TTM成本)', '股息率(现价)'], top: 0 },
+    grid: { left: 40, right: 20, top: 40, bottom: 60 },
+    xAxis: { type: 'category', data: yItems.map((y) => y.name), axisLabel: { interval: 0, rotate: 30, fontSize: 11 } },
+    yAxis: { type: 'value', axisLabel: { formatter: '{value}%' } },
+    series: [
+      {
+        name: '股息率(TTM成本)', type: 'bar',
+        itemStyle: { color: '#059669', borderRadius: [4, 4, 0, 0] },
+        data: yItems.map((y) => Number(((y.yoc_ttm || 0) * 100).toFixed(2))),
+        label: { show: true, position: 'top', formatter: '{c}%', fontSize: 10 },
+      },
+      {
+        name: '股息率(现价)', type: 'bar',
+        itemStyle: { color: '#94a3b8', borderRadius: [4, 4, 0, 0] },
+        data: yItems.map((y) => Number(((y.yield_price || 0) * 100).toFixed(2))),
+      },
+    ],
+  }
+  ylc.render()
+
+  // 派息频率分布（环形饼图）
+  const freqCount = {}
+  ;(holdings.items || holdings || []).forEach((h) => {
+    const f = h.freq || 'irregular'
+    freqCount[f] = (freqCount[f] || 0) + 1
+  })
+  const colorMap = { monthly: '#f59e0b', quarterly: '#3b82f6', semi_annual: '#10b981', annual: '#1e3a8a', irregular: '#94a3b8' }
+  const freqData = Object.entries(freqCount).map(([f, c]) => ({
+    value: c, name: freqMap[f] || f, itemStyle: { color: colorMap[f] || '#94a3b8' },
+  }))
+  freqOpt.value = {
+    tooltip: { trigger: 'item', formatter: '{b}: {c} 只 ({d}%)' },
+    legend: { bottom: 0 },
+    series: [{
+      type: 'pie', radius: ['45%', '70%'], center: ['50%', '45%'],
+      label: { formatter: '{b}\n{c} 只' },
+      data: freqData.length ? freqData : [{ value: 1, name: '暂无', itemStyle: { color: '#e2e8f0' } }],
+    }],
+  }
+  fc.render()
 })
 
-onUnmounted(() => { yc.dispose(); mc.dispose(); tc.dispose() })
+onUnmounted(() => { yc.dispose(); mc.dispose(); tc.dispose(); ylc.dispose(); fc.dispose() })
 </script>
 
 <style scoped>
-.card h3 { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
+.card h3 { font-size: 15px; font-weight: 600; margin: 0 0 8px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .card-head h3 { margin: 0; }
+.hint-text { font-size: 12px; color: #94a3b8; margin: 0 0 12px; }
 .chart-h300 { height: 300px; }
 .row-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
 .mt20 { margin-top: 20px; }
-.rank-num {
-  display: inline-flex; width: 24px; height: 24px; border-radius: 50%;
-  background: #f1f5f9; color: #64748b; align-items: center; justify-content: center;
-  font-size: 12px; font-weight: 600;
-}
-.rank-num.rank-top { background: #f59e0b; color: #fff; }
 .bold { font-weight: 500; }
+.text-emerald { color: #059669; }
+.text-muted { color: #64748b; }
 .empty-tip { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
 </style>

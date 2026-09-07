@@ -1,13 +1,18 @@
 """分红预案采集服务（docs/06 §3.2）。
 
-P1 数据源：东方财富数据中心公开接口（A股分红送配），写死在配置（源管理界面 V2）。
+P1 数据源：
+- A 股：东方财富数据中心公开接口（A股分红送配），写死在配置（源管理界面 V2）。
+- 美股：Alpha Vantage TIME_SERIES_MONTHLY_ADJUSTED（按白名单拉取近 1 年月度分红）。
+  需配置环境变量 XI_AV_API_KEY（到 https://www.alphavantage.co/support/#api-key 免费申请）。
+  无 key 则跳过美股分支并日志提示；免费层 25 次/天，白名单 5 只够用。
 - 置信度评分：交易所/官方数据且字段完整 0.90–0.98；缺派息日 0.80；缺除权日 <0.70
 - 入库 pending；同 (market, code, ex_date) 已存在（任意状态）则跳过
 - 网络失败/离线模式（XI_CRAWL_OFFLINE=1）静默降级，不抛异常
 """
 import logging
 import os
-from datetime import datetime
+import time
+from datetime import datetime, timedelta
 
 import httpx
 from sqlmodel import Session, select
@@ -20,6 +25,13 @@ log = logging.getLogger("xi.crawler")
 _SOURCE_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _MARKET = "a_share"
 _CURRENCY = "CNY"
+
+# 美股派息白名单（蓝筹股 + 知名派息股，Alpha Vantage 免费层 25 次/天，控制在 5 只内）
+_US_TICKERS = ["AAPL", "MSFT", "JNJ", "KO", "PG"]
+_AV_URL = "https://www.alphavantage.co/query"
+_AV_FUN = "TIME_SERIES_MONTHLY_ADJUSTED"
+_US_CURRENCY = "USD"
+_AV_RATE_SLEEP = 12  # Alpha Vantage 限速 5 次/分钟，串行 sleep 12 秒
 
 
 def _clean_date(v) -> str | None:
@@ -96,14 +108,108 @@ def crawl_a_share(session: Session, page_size: int = 100) -> tuple[int, int]:
     return fetched, new_pending
 
 
+def crawl_us_stock(session: Session) -> tuple[int, int]:
+    """抓取美股分红预案（Alpha Vantage TIME_SERIES_MONTHLY_ADJUSTED）。
+
+    每月数据含 "7. dividend amount" 字段，非零即当月有分红。
+    需配置 XI_AV_API_KEY；无 key 则跳过并日志提示。
+    返回 (fetched, new_pending)。
+    """
+    api_key = os.getenv("XI_AV_API_KEY", "").strip()
+    if not api_key:
+        log.info("us_stock crawl skipped: XI_AV_API_KEY not set "
+                 "(申请 https://www.alphavantage.co/support/#api-key)")
+        return 0, 0
+
+    today = datetime.utcnow().date()
+    range_start = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    fetched, new_pending = 0, 0
+
+    for i, ticker in enumerate(_US_TICKERS):
+        if i > 0:
+            time.sleep(_AV_RATE_SLEEP)  # 限速 5 次/分钟
+        try:
+            resp = httpx.get(_AV_URL, params={
+                "function": _AV_FUN, "symbol": ticker, "apikey": api_key,
+            }, timeout=15.0)
+            resp.raise_for_status()
+            data = resp.json()
+        except Exception as e:
+            log.info("av %s fetch failed: %s", ticker, e)
+            continue
+
+        # Alpha Vantage 限流/错误时返回 "Note" 或 "Information" 字段
+        if "Note" in data or "Information" in data:
+            log.info("av %s rate limit: %s", ticker, data.get("Note") or data.get("Information"))
+            continue
+
+        series = data.get("Monthly Adjusted Time Series") or {}
+        if not series:
+            log.info("av %s empty series", ticker)
+            continue
+
+        for date_str, item in series.items():
+            if date_str < range_start:
+                continue
+            try:
+                amount = float(item.get("7. dividend amount", 0) or 0)
+            except (TypeError, ValueError):
+                continue
+            if amount <= 0:
+                continue  # 该月无分红
+            fetched += 1
+            # 月线日期是月末，ex_date 实际在该月内；Alpha Vantage 不给精确 ex_date，用月初近似
+            ex_date = date_str[:8] + "01"
+            # 已存在（任意状态）→ 跳过
+            if session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == "us_stock",
+                    DividendSchedule.code == ticker,
+                    DividendSchedule.ex_date == ex_date)).first():
+                continue
+            session.add(DividendSchedule(
+                market="us_stock", code=ticker, name=ticker,
+                ex_date=ex_date, record_date=ex_date, pay_date=ex_date,
+                dps=round(amount, 4),
+                currency=_US_CURRENCY, div_type="cash", source="crawler",
+                confidence=0.75,  # 月线日期不精确
+                status="pending",
+                raw_title=f"{ticker} monthly dividend ${amount}",
+            ))
+            new_pending += 1
+
+    session.commit()
+    return fetched, new_pending
+
+
 def run_crawl(session: Session) -> dict:
-    """立即触发采集（docs/04 §11.3 /crawl）。离线或失败返回 0 并附 message。"""
+    """立即触发采集（docs/04 §11.3 /crawl）。离线或失败返回 0 并附 message。
+
+    顺序执行 A 股 + 美股两个分支；任一分支异常不中断另一分支。
+    """
     if os.getenv("XI_CRAWL_OFFLINE", "") == "1":
         return {"fetched": 0, "new_pending": 0, "message": "爬虫离线模式（XI_CRAWL_OFFLINE=1）"}
+
+    total_fetched, total_new = 0, 0
+    errors = []
+
+    # A 股分支
     try:
-        fetched, new_pending = crawl_a_share(session)
-    except Exception as e:  # 网络异常不中断后台任务
-        log.warning("crawl failed: %s", e)
-        return {"fetched": 0, "new_pending": 0, "message": "数据源暂时不可用，请稍后重试"}
-    return {"fetched": fetched, "new_pending": new_pending, "crawled_at": now_str(),
-            "date": today_str()}
+        f, n = crawl_a_share(session)
+        total_fetched += f
+        total_new += n
+    except Exception as e:
+        log.warning("a_share crawl failed: %s", e)
+        errors.append("a_share: 数据源暂时不可用")
+
+    # 美股分支（需配置 XI_AV_API_KEY）
+    try:
+        f, n = crawl_us_stock(session)
+        total_fetched += f
+        total_new += n
+    except Exception as e:
+        log.warning("us_stock crawl failed: %s", e)
+        errors.append("us_stock: Alpha Vantage 暂时不可用或未配置 XI_AV_API_KEY")
+
+    msg = "；".join(errors) if errors else None
+    return {"fetched": total_fetched, "new_pending": total_new, "crawled_at": now_str(),
+            "date": today_str(), "message": msg}

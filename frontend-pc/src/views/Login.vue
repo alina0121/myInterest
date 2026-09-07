@@ -23,6 +23,10 @@
           <el-input v-model="form.email" placeholder="邮箱（选填）" size="large" class="mb12" />
           <el-input v-model="form.nickname" placeholder="昵称（选填）" size="large" class="mb12" />
         </template>
+        <div v-if="mode === 'login'" class="login-extra">
+          <el-checkbox v-model="remember">记住我</el-checkbox>
+          <el-link type="primary" :underline="false" style="font-size: 12px">忘记密码？</el-link>
+        </div>
 
         <el-button type="primary" size="large" class="submit-btn" :loading="loading" @click="submit">
           {{ mode === 'login' ? '登 录' : '注 册' }}
@@ -51,6 +55,7 @@ const userStore = useUserStore()
 
 const mode = ref('login')
 const loading = ref(false)
+const remember = ref(true)
 const form = reactive({ account: '', password: '', email: '', nickname: '' })
 
 async function submit() {
@@ -108,6 +113,7 @@ async function submit() {
 }
 .tab.active { color: var(--primary); font-weight: 500; border-bottom-color: var(--primary); }
 .mb12 { margin-bottom: 12px; }
+.login-extra { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .submit-btn { width: 100%; margin-top: 4px; background: var(--primary); border-color: var(--primary); }
 .divider {
   display: flex; align-items: center; gap: 8px; margin: 20px 0 12px;

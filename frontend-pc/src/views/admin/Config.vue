@@ -1,13 +1,27 @@
 <template>
   <div>
-    <!-- 汇率 -->
-    <div class="card">
-      <div class="card-head">
-        <h3>汇率管理（折 CNY）</h3>
-        <div>
-          <el-button @click="addRateDlg = true">+ 手动录入</el-button>
-          <el-button type="primary" :loading="refreshing" @click="refreshRates">从数据源刷新</el-button>
+    <h1 class="page-title">汇率与税率配置</h1>
+
+    <!-- 汇率大数字卡片 -->
+    <div class="rate-cards">
+      <div class="card rate-card" v-for="cur in ['USD', 'HKD']" :key="cur">
+        <div class="rate-head">
+          <h3>{{ curName[cur] }} 汇率</h3>
+          <el-button size="small" :loading="refreshing && cur === 'USD'" @click="refreshRates">🔄 自动获取</el-button>
         </div>
+        <div class="rate-big">
+          <span class="rate-num">{{ latestRate(cur) || '-' }}</span>
+          <span class="rate-unit">CNY / {{ cur }}</span>
+        </div>
+        <div class="rate-meta">更新于 {{ latestDate(cur) || '-' }} · 每日自动更新，历史分红按派息日汇率折算</div>
+      </div>
+    </div>
+
+    <!-- 汇率明细 + 手动录入 -->
+    <div class="card mt20">
+      <div class="card-head">
+        <h3>汇率明细</h3>
+        <el-button @click="addRateDlg = true">+ 手动录入</el-button>
       </div>
       <el-table :data="rates" v-loading="rateLoading" style="width: 100%">
         <el-table-column label="货币对" width="140">
@@ -20,21 +34,18 @@
         <el-table-column prop="source" label="数据源" width="140" />
         <el-table-column prop="created_at" label="录入时间" width="180" />
       </el-table>
-      <p class="text-muted" style="font-size: 12px; margin-top: 12px">
-        每日自动从 frankfurter 拉取 USD/HKD 兑 CNY 汇率；分红按到账日汇率折算
-      </p>
     </div>
 
     <!-- 税率规则 -->
     <div class="card mt20">
-      <h3>分红税率规则</h3>
+      <div class="card-head"><h3>各市场股息税率（用于税后到账估算）</h3></div>
       <el-table :data="taxRules" v-loading="taxLoading" style="width: 100%">
-        <el-table-column label="市场" width="80">
+        <el-table-column label="市场" width="90">
           <template #default="{ row }">
             <span class="badge" :class="'badge-' + row.market.replace('_stock', '')">{{ marketMap[row.market]?.label }}</span>
           </template>
         </el-table-column>
-        <el-table-column prop="condition" label="条件" min-width="160" />
+        <el-table-column prop="condition" label="税务情形" min-width="160" />
         <el-table-column label="税率" width="100" align="right">
           <template #default="{ row }">
             <el-input-number v-if="editing === row.id" v-model="editRate" :min="0" :max="1" :step="0.05"
@@ -42,15 +53,10 @@
             <span v-else class="bold">{{ (row.rate * 100).toFixed(0) }}%</span>
           </template>
         </el-table-column>
-        <el-table-column label="持有天数" width="130" align="center">
-          <template #default="{ row }">
-            {{ row.hold_min_days ?? 0 }} ~ {{ row.hold_max_days ?? '∞' }}
-          </template>
-        </el-table-column>
         <el-table-column prop="description" label="说明" min-width="220" show-overflow-tooltip />
-        <el-table-column label="启用" width="80" align="center">
+        <el-table-column label="状态" width="100" align="center">
           <template #default="{ row }">
-            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '启用' : '停用' }}</el-tag>
+            <el-tag :type="row.enabled ? 'success' : 'info'" size="small">{{ row.enabled ? '生效中' : '已停用' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
@@ -68,9 +74,18 @@
           </template>
         </el-table-column>
       </el-table>
-      <p class="text-muted" style="font-size: 12px; margin-top: 12px">
-        税率变更需超级管理员权限，修改后自动重算相关分红税费
-      </p>
+      <p class="hint-text">税率变更需超级管理员权限，修改后自动重算相关分红税费</p>
+    </div>
+
+    <!-- 分红提醒与预告规则 -->
+    <div class="card mt20">
+      <h3>分红提醒与预告规则</h3>
+      <div class="rule-grid">
+        <label class="rule-item"><el-checkbox v-model="rules.auto_push" disabled /> 预案审核通过后自动推送给持仓用户（App 推送 / 小程序订阅消息）</label>
+        <label class="rule-item"><el-checkbox v-model="rules.remind_3d" disabled /> 派息日前 3 天、当天各提醒一次</label>
+        <label class="rule-item"><el-checkbox v-model="rules.forecast_freq" disabled /> 季派/月派股票按历史派息节奏自动生成推算预告</label>
+        <label class="rule-item"><el-checkbox v-model="rules.user_submit" disabled /> 允许用户提交预案（需人工审核）</label>
+      </div>
     </div>
 
     <!-- 手动录入汇率 -->
@@ -112,8 +127,19 @@ const addRateDlg = ref(false)
 const saving = ref(false)
 const editing = ref(null)
 const editRate = ref(0)
+const curName = { USD: '美元', HKD: '港币' }
+const rules = reactive({ auto_push: true, remind_3d: true, forecast_freq: true, user_submit: false })
 
 const rateForm = reactive({ base: 'USD', rate: undefined, rate_date: '' })
+
+function latestRate(cur) {
+  const r = rates.value.find((x) => x.base === cur)
+  return r ? Number(r.rate).toFixed(4) : null
+}
+function latestDate(cur) {
+  const r = rates.value.find((x) => x.base === cur)
+  return r ? (r.rate_date || r.created_at?.slice(0, 16)) : null
+}
 
 async function loadRates() {
   rateLoading.value = true
@@ -174,9 +200,21 @@ onMounted(() => { loadRates(); loadTax() })
 </script>
 
 <style scoped>
-.card h3 { font-size: 15px; font-weight: 600; margin: 0; }
+.page-title { font-size: 18px; font-weight: 700; color: #1e293b; margin: 0 0 16px; }
+.rate-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.rate-card .rate-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.rate-card .rate-head h3 { margin: 0; font-size: 15px; font-weight: 600; }
+.rate-big { display: flex; align-items: flex-end; gap: 8px; }
+.rate-num { font-size: 30px; font-weight: 700; color: #1e293b; }
+.rate-unit { font-size: 13px; color: #94a3b8; margin-bottom: 4px; }
+.rate-meta { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+.card h3 { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.card-head h3 { margin: 0; }
 .mt20 { margin-top: 20px; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
 .bold { font-weight: 600; }
+.hint-text { font-size: 12px; color: #94a3b8; margin-top: 12px; }
+.rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.rule-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
 </style>
