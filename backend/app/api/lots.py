@@ -4,7 +4,7 @@ from sqlmodel import Session
 
 from ..database import get_session
 from ..models import Lot, User
-from ..schemas import LotCreate, LotUpdate
+from ..schemas import LotBatchIn, LotCreate, LotUpdate
 from ..services import dividend_service, lots_service
 from ..utils.errors import AppError, Codes, not_found, ok
 from .deps import get_current_user
@@ -52,6 +52,41 @@ def create_lot(holding_id: int, body: LotCreate,
     # 触发相关分红重算（docs/03 §2.4）
     dividend_service.recalc_holding_dividends(session, h.id, lot.trade_date)
     return ok({"lot": lots_service.lot_out(session, lot), "holding": holding_out(session, h)})
+
+
+@router.post("/api/holdings/{holding_id}/lots/batch")
+def create_lots_batch(holding_id: int, body: LotBatchIn,
+                      session: Session = Depends(get_session),
+                      user: User = Depends(get_current_user)):
+    """批量录入批次：一次提交多个买入/卖出/送转记录。
+
+    按顺序逐条校验与写入（卖出校验依赖前序买入累计持仓），
+    任意一条失败则整体回滚事务。
+    """
+    h = get_owned_holding(session, user, holding_id)
+    created = []
+    earliest_date = None
+    for item in body.lots:
+        _check_buy_price(item.direction, item.price)
+        lots_service.validate_sell(session, h.id, item.direction, item.shares)
+        lot = Lot(user_id=user.id, holding_id=h.id,
+                  trade_date=item.trade_date.isoformat(),
+                  direction=item.direction, shares=item.shares,
+                  price=item.price, fee=item.fee, note=item.note)
+        session.add(lot)
+        session.flush()
+        created.append(lot)
+        if earliest_date is None or lot.trade_date < earliest_date:
+            earliest_date = lot.trade_date
+    session.commit()
+    # 批量重算分红归属（从最早批次日期开始）
+    if earliest_date:
+        dividend_service.recalc_holding_dividends(session, h.id, earliest_date)
+    return ok({
+        "created": len(created),
+        "lots": [lots_service.lot_out(session, l) for l in created],
+        "holding": holding_out(session, h),
+    })
 
 
 @router.patch("/api/lots/{lot_id}")

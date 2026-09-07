@@ -8,6 +8,10 @@
         <el-radio-button value="rejected">已驳回 ({{ counts.rejected || 0 }})</el-radio-button>
       </el-radio-group>
       <div class="toolbar-right">
+        <template v-if="status === 'pending'">
+          <el-button type="primary" :disabled="!selectedIds.length" :loading="saving" @click="batchPublish">批量发布</el-button>
+          <el-button type="danger" :disabled="!selectedIds.length" :loading="saving" @click="batchReject">批量驳回</el-button>
+        </template>
         <el-button @click="crawlDlg = true">手动录入</el-button>
         <el-button type="primary" :loading="crawling" @click="crawl">立即爬取</el-button>
       </div>
@@ -15,7 +19,8 @@
 
     <!-- 预案表格 -->
     <div class="card">
-      <el-table :data="list" v-loading="loading" style="width: 100%">
+      <el-table ref="tableRef" :data="list" v-loading="loading" style="width: 100%" @selection-change="handleSelectionChange">
+        <el-table-column v-if="status === 'pending'" type="selection" width="48" />
         <el-table-column label="市场" width="80">
           <template #default="{ row }">
             <span class="badge" :class="'badge-' + row.market.replace('_stock', '')">{{ marketMap[row.market]?.label }}</span>
@@ -112,7 +117,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { apiAdminSchedules, apiAdminCreateSchedule, apiAdminApproveSchedule, apiAdminRejectSchedule, apiAdminCrawl } from '../../api'
+import { apiAdminSchedules, apiAdminCreateSchedule, apiAdminApproveSchedule, apiAdminRejectSchedule, apiAdminCrawl, apiAdminBatchApprove } from '../../api'
 import { MARKETS, marketMap } from '../../utils/constants'
 
 const status = ref('pending')
@@ -125,6 +130,8 @@ const saving = ref(false)
 const rejectDlg = ref(false)
 const rejectRow = ref(null)
 const rejectReason = ref('')
+const tableRef = ref()
+const selectedIds = ref([])
 
 const form = reactive({
   market: 'a_share', code: '', name: '', dps: undefined, currency: 'CNY',
@@ -207,6 +214,45 @@ async function confirmReject() {
     await apiAdminRejectSchedule(rejectRow.value.id, rejectReason.value.trim())
     ElMessage.success('已驳回')
     rejectDlg.value = false
+    load()
+  } catch (e) { /* toast 已统一 */ } finally { saving.value = false }
+}
+
+function handleSelectionChange(rows) {
+  selectedIds.value = rows.map(r => r.id)
+}
+
+async function batchPublish() {
+  if (!selectedIds.value.length) return
+  saving.value = true
+  try {
+    const r = await apiAdminBatchApprove(selectedIds.value, 'publish')
+    ElMessage.success(`已发布 ${r.handled} 条`)
+    tableRef.value?.clearSelection()
+    load()
+  } catch (e) { /* toast 已统一 */ } finally { saving.value = false }
+}
+
+async function batchReject() {
+  if (!selectedIds.value.length) return
+  let reason
+  try {
+    const res = await ElMessageBox.prompt('请输入驳回理由', '批量驳回', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      inputType: 'textarea',
+      inputPlaceholder: '驳回理由（必填）',
+    })
+    reason = res.value
+  } catch (e) {
+    return // 用户取消
+  }
+  if (!reason || !reason.trim()) return ElMessage.warning('请填写驳回理由')
+  saving.value = true
+  try {
+    const r = await apiAdminBatchApprove(selectedIds.value, 'reject', reason.trim())
+    ElMessage.success(`已驳回 ${r.handled} 条`)
+    tableRef.value?.clearSelection()
     load()
   } catch (e) { /* toast 已统一 */ } finally { saving.value = false }
 }

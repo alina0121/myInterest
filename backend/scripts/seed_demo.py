@@ -2,9 +2,9 @@
 
 造数据流程：
 1. 创建/复用 demo 用户（用户名 demo，密码 demo123456）
-2. 多市场持仓 + 多批次买入（A股/美股/港股/基金）
-3. 调用 dividend_service.create_dividend 造已到账分红（自动生成批次归属明细）
-4. 直接写 dividend_schedules 表造待确认 pending 预案（含美股 Yahoo 爬虫已支持）
+2. 10 只股票多市场持仓 + 多批次买入（A 股 5 + 美股 3 + 港股 1 + 基金 1）
+3. 调用 dividend_service.create_dividend 造已到账/预告分红（自动生成批次归属明细）
+4. 直接写 dividend_schedules 表造待确认 pending 预案
 
 用法：
     cd backend
@@ -31,15 +31,11 @@ from app.models import (  # noqa: E402
 from app.services.dividend_service import create_dividend  # noqa: E402
 from app.services.crawler_service import run_crawl  # noqa: E402
 from app.utils.security import hash_password  # noqa: E402
-from app.utils.timeutil import now_str  # noqa: E402
 
 DEMO_USERNAME = "demo"
 DEMO_PASSWORD = "demo123456"
 
-# ---------- 持仓 + 批次定义 ----------
-# (market, code, name, currency, freq, account, note, lots[], dividends[])
-# lots: [(trade_date, direction, shares, price, fee)]
-# dividends: [(ex_date, record_date, pay_date, dps, status, note)]
+# ---------- 持仓 + 批次 + 分红定义（10 只股票） ----------
 PORTFOLIO = [
     # A 股：贵州茅台（年派）
     {
@@ -50,7 +46,9 @@ PORTFOLIO = [
             ("2023-09-20", "buy", 40, 1600.0, 5.0),
         ],
         "dividends": [
-            ("2024-06-19", "2024-06-18", "2024-06-20", 25.91, "confirmed", "2023 年年度分红"),
+            ("2024-06-19", "2024-06-18", "2024-06-20", 25.91, "confirmed", "2023 年度分红"),
+            ("2025-06-19", "2025-06-18", "2025-06-20", 30.00, "confirmed", "2024 年度分红"),
+            ("2026-06-19", "2026-06-18", "2026-06-20", 32.00, "pending", "2025 年度分红预案"),
         ],
     },
     # A 股：工商银行（半年派）
@@ -59,9 +57,48 @@ PORTFOLIO = [
         "currency": "CNY", "freq": "semi_annual", "account": "华泰证券",
         "lots": [
             ("2023-03-15", "buy", 3000, 4.50, 5.0),
+            ("2024-01-10", "buy", 2000, 4.80, 5.0),
         ],
         "dividends": [
             ("2024-07-16", "2024-07-15", "2024-07-17", 0.3064, "confirmed", "2024 中期分红"),
+            ("2025-07-16", "2025-07-15", "2025-07-17", 0.3334, "confirmed", "2025 中期分红"),
+            ("2026-07-16", "2026-07-15", "2026-07-17", 0.3500, "pending", "2026 中期分红预案"),
+        ],
+    },
+    # A 股：中国神华（年派，高股息）
+    {
+        "market": "a_share", "code": "601088", "name": "中国神华",
+        "currency": "CNY", "freq": "annual", "account": "中信证券",
+        "lots": [
+            ("2023-05-10", "buy", 2000, 28.50, 5.0),
+            ("2024-02-15", "buy", 1000, 32.00, 5.0),
+        ],
+        "dividends": [
+            ("2025-06-28", "2025-06-27", "2025-06-30", 2.55, "confirmed", "2024 年度分红"),
+        ],
+    },
+    # A 股：招商银行（半年派）
+    {
+        "market": "a_share", "code": "600036", "name": "招商银行",
+        "currency": "CNY", "freq": "semi_annual", "account": "华泰证券",
+        "lots": [
+            ("2022-11-20", "buy", 1000, 42.00, 5.0),
+            ("2024-03-10", "buy", 500, 38.50, 5.0),
+        ],
+        "dividends": [
+            ("2024-07-12", "2024-07-11", "2024-07-12", 1.98, "confirmed", "2024 中期分红"),
+            ("2025-07-12", "2025-07-11", "2025-07-12", 2.10, "confirmed", "2025 中期分红"),
+        ],
+    },
+    # A 股：长江电力（年派，稳定派息）
+    {
+        "market": "a_share", "code": "600900", "name": "长江电力",
+        "currency": "CNY", "freq": "annual", "account": "中信证券",
+        "lots": [
+            ("2023-07-18", "buy", 3000, 22.00, 5.0),
+        ],
+        "dividends": [
+            ("2025-07-18", "2025-07-17", "2025-07-18", 0.85, "confirmed", "2024 年度分红"),
         ],
     },
     # 美股：Apple（季派）
@@ -74,6 +111,8 @@ PORTFOLIO = [
         ],
         "dividends": [
             ("2024-08-12", "2024-08-12", "2024-08-15", 0.25, "confirmed", "Q3 季度分红"),
+            ("2025-05-12", "2025-05-12", "2025-05-15", 0.26, "confirmed", "2025 Q2 分红"),
+            ("2025-08-11", "2025-08-11", "2025-08-14", 0.26, "confirmed", "2025 Q3 分红"),
         ],
     },
     # 美股：Microsoft（季派）
@@ -82,9 +121,25 @@ PORTFOLIO = [
         "currency": "USD", "freq": "quarterly", "account": "富途牛牛",
         "lots": [
             ("2023-01-20", "buy", 30, 240.0, 1.0),
+            ("2024-08-01", "buy", 20, 420.0, 1.0),
         ],
         "dividends": [
             ("2024-08-15", "2024-08-15", "2024-09-10", 0.75, "confirmed", "Q4 季度分红"),
+            ("2025-05-15", "2025-05-15", "2025-06-10", 0.83, "confirmed", "2025 Q2 分红"),
+            ("2025-08-14", "2025-08-14", "2025-09-10", 0.83, "confirmed", "2025 Q3 分红"),
+        ],
+    },
+    # 美股：Coca-Cola（季派，经典派息股）
+    {
+        "market": "us_stock", "code": "KO", "name": "Coca-Cola",
+        "currency": "USD", "freq": "quarterly", "account": "富途牛牛",
+        "lots": [
+            ("2022-06-10", "buy", 200, 60.0, 1.0),
+            ("2024-01-15", "buy", 100, 58.0, 1.0),
+        ],
+        "dividends": [
+            ("2024-06-28", "2024-06-28", "2024-07-01", 0.485, "confirmed", "2024 Q2 分红"),
+            ("2025-06-13", "2025-06-13", "2025-06-16", 0.51, "confirmed", "2025 Q2 分红"),
         ],
     },
     # 港股：腾讯控股（季派）
@@ -93,9 +148,11 @@ PORTFOLIO = [
         "currency": "HKD", "freq": "quarterly", "account": "富途牛牛",
         "lots": [
             ("2022-09-20", "buy", 200, 320.0, 50.0),
+            ("2024-04-15", "buy", 100, 380.0, 50.0),
         ],
         "dividends": [
             ("2024-05-16", "2024-05-16", "2024-05-17", 3.40, "confirmed", "Q1 季度分红"),
+            ("2025-05-16", "2025-05-16", "2025-05-17", 4.25, "confirmed", "2025 Q1 分红"),
         ],
     },
     # 基金：易方达蓝筹（年派）
@@ -104,9 +161,11 @@ PORTFOLIO = [
         "currency": "CNY", "freq": "annual", "account": "蚂蚁基金",
         "lots": [
             ("2023-02-10", "buy", 10000, 2.50, 0.0),
+            ("2024-03-05", "buy", 5000, 2.20, 0.0),
         ],
         "dividends": [
             ("2024-08-20", "2024-08-20", "2024-08-21", 0.092, "confirmed", "2023 年度分红"),
+            ("2025-08-20", "2025-08-20", "2025-08-21", 0.10, "confirmed", "2024 年度分红"),
         ],
     },
 ]
@@ -114,19 +173,27 @@ PORTFOLIO = [
 # ---------- 待确认预案（dividend_schedules, status=pending） ----------
 PENDING_SCHEDULES = [
     # A 股
-    ("a_share", "601398", "工商银行", "2025-01-08", "2025-01-07", "2025-01-08",
-     0.3064, "CNY", "crawler", 0.95, "2024 年末期分红预案"),
+    ("a_share", "601398", "工商银行", "2027-01-08", "2027-01-07", "2027-01-08",
+     0.3800, "CNY", "crawler", 0.95, "2026 年末期分红预案"),
+    ("a_share", "601088", "中国神华", "2027-06-28", "2027-06-27", "2027-06-30",
+     2.80, "CNY", "crawler", 0.92, "2026 年度分红预案"),
+    ("a_share", "600036", "招商银行", "2027-07-12", "2027-07-11", "2027-07-12",
+     2.20, "CNY", "crawler", 0.90, "2026 中期分红预案"),
+    ("a_share", "600900", "长江电力", "2027-07-18", "2027-07-17", "2027-07-18",
+     0.95, "CNY", "manual", 0.60, "2026 年度分红预案（待公告）"),
     # 美股
-    ("us_stock", "AAPL", "Apple", "2024-11-11", "2024-11-11", "2024-11-14",
-     0.25, "USD", "crawler", 0.92, "Q4 季度分红预案"),
-    ("us_stock", "MSFT", "Microsoft", "2024-11-20", "2024-11-20", "2024-12-10",
-     0.83, "USD", "crawler", 0.92, "Q1 季度分红预案"),
+    ("us_stock", "AAPL", "Apple", "2026-11-09", "2026-11-09", "2026-11-12",
+     0.27, "USD", "crawler", 0.92, "2026 Q4 季度分红预案"),
+    ("us_stock", "MSFT", "Microsoft", "2026-11-19", "2026-11-19", "2026-12-10",
+     0.92, "USD", "crawler", 0.92, "2026 Q1 季度分红预案"),
+    ("us_stock", "KO", "Coca-Cola", "2026-06-26", "2026-06-26", "2026-06-29",
+     0.53, "USD", "crawler", 0.88, "2026 Q2 季度分红预案"),
     # 港股
-    ("hk_stock", "00700", "腾讯控股", "2024-08-16", "2024-08-16", "2024-08-17",
-     3.40, "HKD", "crawler", 0.90, "Q2 季度分红预案"),
+    ("hk_stock", "00700", "腾讯控股", "2026-05-15", "2026-05-15", "2026-05-16",
+     4.50, "HKD", "crawler", 0.90, "2026 Q1 季度分红预案"),
     # 基金
-    ("fund", "005827", "易方达蓝筹", "2025-08-20", "2025-08-20", "2025-08-21",
-     0.092, "CNY", "manual", 0.60, "2024 年度分红预案（待公告）"),
+    ("fund", "005827", "易方达蓝筹", "2027-08-20", "2027-08-20", "2027-08-21",
+     0.11, "CNY", "manual", 0.60, "2026 年度分红预案（待公告）"),
 ]
 
 
@@ -212,7 +279,7 @@ def create_holding_with_lots(session: Session, user: User, spec: dict) -> Holdin
 
 
 def create_dividends_for(session: Session, user: User, holding: Holding, spec: dict) -> int:
-    """为持仓造已到账分红，调用 create_dividend 自动生成批次归属。"""
+    """为持仓造已到账/预告分红，调用 create_dividend 自动生成批次归属。"""
     n = 0
     for ex_date, record_date, pay_date, dps, status, note in spec["dividends"]:
         create_dividend(
@@ -266,7 +333,7 @@ def main() -> None:
         user = get_or_create_demo_user(session)
         clean_demo_data(session, user)
 
-        print(f"\n>>> 为 {user.username} 创建多市场持仓与分红...")
+        print(f"\n>>> 为 {user.username} 创建 10 只股票多市场持仓与分红...")
         total_h, total_l, total_d = 0, 0, 0
         for spec in PORTFOLIO:
             h = create_holding_with_lots(session, user, spec)
@@ -274,9 +341,9 @@ def main() -> None:
             total_l += len(spec["lots"])
             nd = create_dividends_for(session, user, h, spec)
             total_d += nd
-            print(f"  ✓ {spec['market']:>9} {spec['code']:<8} {spec['name']:<10}"
+            print(f"  ✓ {spec['market']:>9} {spec['code']:<8} {spec['name']:<12}"
                   f"  批次 {len(spec['lots'])} · 分红 {nd}")
-        print(f"合计：持仓 {total_h} · 批次 {total_l} · 已到账分红 {total_d}")
+        print(f"合计：持仓 {total_h} · 批次 {total_l} · 分红记录 {total_d}")
 
         print("\n>>> 写入待确认预案（pending schedules）...")
         ns = create_pending_schedules(session)
@@ -285,7 +352,7 @@ def main() -> None:
     # 可选：触发真实爬虫（联网）
     if args.crawl:
         os.environ.pop("XI_CRAWL_OFFLINE", None)
-        print("\n>>> 触发爬虫（A 股 + 美股 Yahoo Finance）...")
+        print("\n>>> 触发爬虫（A 股 + 美股 Alpha Vantage）...")
         with Session(engine) as session:
             r = run_crawl(session)
             print(f"  fetched={r.get('fetched')} new_pending={r.get('new_pending')}"

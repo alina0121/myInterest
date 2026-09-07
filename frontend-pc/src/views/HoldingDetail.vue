@@ -17,6 +17,7 @@
         </div>
         <div>
           <el-button type="primary" @click="lotDlg = true">+ 添加批次</el-button>
+          <el-button type="primary" plain @click="openBatchDlg">批量录入</el-button>
           <el-button @click="$router.back()">返回</el-button>
         </div>
       </div>
@@ -163,6 +164,66 @@
         <el-button type="primary" :loading="saving" @click="saveLot">保存</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量录入批次 -->
+    <el-dialog v-model="batchDlg" title="批量录入批次" width="960">
+      <el-table :data="batchLots" size="small" border style="width: 100%">
+        <el-table-column label="交易日期" width="170">
+          <template #default="{ row }">
+            <el-date-picker
+              v-model="row.trade_date"
+              type="date"
+              value-format="YYYY-MM-DD"
+              placeholder="选择日期"
+              style="width: 100%"
+            />
+          </template>
+        </el-table-column>
+        <el-table-column label="方向" width="120">
+          <template #default="{ row }">
+            <el-select v-model="row.direction" style="width: 100%">
+              <el-option label="买入" value="buy" />
+              <el-option label="卖出" value="sell" />
+              <el-option label="送转" value="bonus_share" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="数量(股)" width="140">
+          <template #default="{ row }">
+            <el-input-number v-model="row.shares" :min="0" :controls="false" style="width: 100%" />
+          </template>
+        </el-table-column>
+        <el-table-column label="成交价" width="140">
+          <template #default="{ row }">
+            <el-input-number v-model="row.price" :min="0" :precision="4" :controls="false" style="width: 100%" />
+          </template>
+        </el-table-column>
+        <el-table-column label="费用" width="130">
+          <template #default="{ row }">
+            <el-input-number v-model="row.fee" :min="0" :precision="2" :controls="false" style="width: 100%" />
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="150">
+          <template #default="{ row }">
+            <el-input v-model="row.note" placeholder="选填" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="80" fixed="right">
+          <template #default="{ $index }">
+            <el-button link type="danger" :icon="Delete" @click="removeBatchRow($index)">删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="batch-toolbar">
+        <el-button :icon="Plus" @click="addBatchRow">+ 新增一行</el-button>
+      </div>
+      <template #footer>
+        <div class="batch-footer">
+          <el-button @click="batchDlg = false">取消</el-button>
+          <el-button type="primary" :loading="batchSaving" @click="saveBatchLots">批量保存</el-button>
+        </div>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -170,7 +231,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { apiHolding, apiLots, apiCreateLot, apiDeleteLot, apiDividends, apiHoldingStats } from '../api'
+import { Plus, Delete } from '@element-plus/icons-vue'
+import { apiHolding, apiLots, apiCreateLot, apiCreateLotsBatch, apiDeleteLot, apiDividends, apiHoldingStats } from '../api'
 import { marketMap, fmt, fmtCNY, currencyMap, freqMap } from '../utils/constants'
 
 const route = useRoute()
@@ -190,6 +252,27 @@ const lotDlg = ref(false)
 const saving = ref(false)
 
 const lotForm = reactive({ direction: 'buy', trade_date: '', shares: undefined, price: undefined, fee: 0, note: '' })
+
+const batchDlg = ref(false)
+const batchSaving = ref(false)
+const batchLots = ref([])
+
+function newBatchRow() {
+  return { trade_date: '', direction: 'buy', shares: undefined, price: undefined, fee: 0, note: '' }
+}
+
+function openBatchDlg() {
+  batchLots.value = Array.from({ length: 5 }, newBatchRow)
+  batchDlg.value = true
+}
+
+function addBatchRow() {
+  batchLots.value.push(newBatchRow())
+}
+
+function removeBatchRow(idx) {
+  batchLots.value.splice(idx, 1)
+}
 
 function sym(c) { return currencyMap[c]?.symbol || '' }
 
@@ -236,6 +319,31 @@ async function delLot(lot) {
   } catch (e) { /* toast 已统一 */ }
 }
 
+async function saveBatchLots() {
+  const payload = batchLots.value
+    .filter(r => r.trade_date && r.shares)
+    .map(r => ({
+      trade_date: r.trade_date,
+      direction: r.direction,
+      shares: Number(r.shares),
+      price: Number(r.price || 0),
+      fee: Number(r.fee || 0),
+      note: r.note || null,
+    }))
+  if (!payload.length) return ElMessage.warning('请至少填写一行有效数据（日期 + 数量）')
+  batchSaving.value = true
+  try {
+    await apiCreateLotsBatch(id, payload)
+    ElMessage.success(`已批量添加 ${payload.length} 条批次`)
+    batchDlg.value = false
+    load()
+  } catch (e) {
+    /* toast 已统一 */
+  } finally {
+    batchSaving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -264,4 +372,6 @@ onMounted(load)
 .empty-tip { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
 .alloc-box { padding: 8px 16px 16px 48px; background: #f8fafc; }
 .alloc-line { display: flex; gap: 24px; font-size: 13px; padding: 4px 0; color: #475569; }
+.batch-toolbar { margin-top: 12px; }
+.batch-footer { display: flex; justify-content: flex-end; gap: 8px; }
 </style>

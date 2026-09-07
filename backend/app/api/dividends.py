@@ -4,7 +4,7 @@ from sqlmodel import Session, select
 
 from ..database import get_session
 from ..models import Dividend, DividendAllocation, Holding, User
-from ..schemas import ConfirmIn, DividendCreate, DividendUpdate
+from ..schemas import ConfirmIn, DividendBatchIn, DividendCreate, DividendUpdate
 from ..services import dividend_service, fx_service, schedule_service
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.timeutil import now_str
@@ -95,6 +95,31 @@ def create_dividend(body: DividendCreate, session: Session = Depends(get_session
     out = dividend_out(session, d, h, True)
     out["record_date_auto"] = (body.record_date is None and h.market == "a_share")
     return ok(out)
+
+
+@router.post("/batch")
+def create_dividends_batch(body: DividendBatchIn,
+                           session: Session = Depends(get_session),
+                           user: User = Depends(get_current_user)):
+    """批量录入分红：支持一次提交多只持仓的多笔分红。
+
+    每条单独调用 create_dividend 自动生成批次归属明细与税费估算。
+    任意一条失败则整体回滚。
+    """
+    results = []
+    for item in body.dividends:
+        h = get_owned_holding(session, user, item.holding_id)
+        d = dividend_service.create_dividend(
+            session, user.id, h,
+            ex_date=item.ex_date.isoformat(),
+            pay_date=item.pay_date.isoformat(),
+            dps=item.dps,
+            record_date=item.record_date.isoformat() if item.record_date else None,
+            tax=item.tax, div_type=item.div_type,
+            status=item.status, note=item.note,
+        )
+        results.append(dividend_out(session, d, h, True))
+    return ok({"created": len(results), "dividends": results})
 
 
 @router.post("/auto-match")

@@ -16,8 +16,8 @@ from ..database import get_session
 from ..models import (AdminOperationLog, Announcement, Dividend, DividendSchedule,
                       ExchangeRate, Feedback, Holding, Lot, TaxRule, User)
 from ..schemas import (AnnouncementCreate, AnnouncementUpdate, FeedbackHandleIn,
-                       RateManualIn, ScheduleAdminCreate, ScheduleRejectIn,
-                       TaxRuleUpdate)
+                       RateManualIn, ScheduleAdminCreate, ScheduleBatchApproveIn,
+                       ScheduleRejectIn, TaxRuleUpdate)
 from ..services import crawler_service, fx_service, lots_service, schedule_service
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.security import hash_password
@@ -328,6 +328,61 @@ def approve_schedule(sid: int, background_tasks: BackgroundTasks, request: Reque
     # 发布后异步触发全体相关用户 auto-match（docs/06 §3.2）
     background_tasks.add_task(schedule_service.auto_match_all_background)
     return ok(schedule_out(session, s))
+
+
+@router.post("/schedules/batch-approve")
+def batch_approve_schedules(body: ScheduleBatchApproveIn,
+                            background_tasks: BackgroundTasks, request: Request,
+                            session: Session = Depends(get_session),
+                            admin: User = Depends(get_admin_user)):
+    """批量审核预案：一次发布或驳回多条 pending 预案。
+
+    action="publish"：发布（校验同单条逻辑，任一失败则整体回滚）
+    action="reject"：驳回（需提供 reason）
+    """
+    handled = []
+    for sid in body.ids:
+        s = session.get(DividendSchedule, sid)
+        if s is None:
+            raise not_found()
+        if body.action == "publish":
+            if s.status == "published":
+                raise AppError(Codes.VALIDATION, f"预案 #{sid} 已发布", status=422)
+            if not s.ex_date or not s.dps:
+                raise AppError(Codes.VALIDATION,
+                               f"预案 #{sid} 缺少除权日或每股分红", status=422)
+            dup = session.exec(select(DividendSchedule).where(
+                DividendSchedule.market == s.market, DividendSchedule.code == s.code,
+                DividendSchedule.ex_date == s.ex_date,
+                DividendSchedule.status == "published",
+                DividendSchedule.id != s.id)).first()
+            if dup:
+                raise AppError(Codes.SCHEDULE_DUPLICATE,
+                               f"预案 #{sid} 除权日已存在发布记录", status=409)
+            s.status = "published"
+            _log(session, admin, request, "schedule.batch_approve", "schedule", s.id,
+                 {"action": "publish", "market": s.market, "code": s.code})
+        else:  # reject
+            if s.status != "pending":
+                raise AppError(Codes.VALIDATION, f"预案 #{sid} 非待审核状态", status=422)
+            if not body.reason:
+                raise AppError(Codes.VALIDATION, "驳回需提供 reason", status=422)
+            s.status = "rejected"
+            s.reject_reason = body.reason
+            _log(session, admin, request, "schedule.batch_approve", "schedule", s.id,
+                 {"action": "reject", "reason": body.reason})
+        s.reviewed_by = admin.id
+        s.reviewed_at = now_str()
+        session.add(s)
+        handled.append(s)
+    session.commit()
+    if body.action == "publish":
+        background_tasks.add_task(schedule_service.auto_match_all_background)
+    return ok({
+        "action": body.action,
+        "handled": len(handled),
+        "items": [schedule_out(session, s) for s in handled],
+    })
 
 
 @router.post("/schedules/{sid}/reject")

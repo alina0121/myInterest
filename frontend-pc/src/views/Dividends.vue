@@ -13,6 +13,7 @@
         <el-option label="待确认" value="pending" />
       </el-select>
       <el-button type="primary" @click="openCreate">+ 记一笔分红</el-button>
+      <el-button type="primary" plain @click="openBatch">批量录入</el-button>
     </div>
 
     <!-- 分红表格 -->
@@ -131,6 +132,79 @@
         <el-button type="primary" @click="resultDlg = false">完成</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量录入分红 -->
+    <el-dialog v-model="batchDlg" title="批量录入分红" width="1040" :close-on-click-modal="false">
+      <el-table :data="batchRows" size="small" border style="width: 100%">
+        <el-table-column label="持仓" min-width="180">
+          <template #default="{ row }">
+            <el-select v-model="row.holding_id" placeholder="选择持仓" filterable style="width: 100%">
+              <el-option v-for="h in holdings" :key="h.id"
+                         :label="`${h.name} (${h.code})`" :value="h.id" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="除权日" width="155">
+          <template #default="{ row }">
+            <el-date-picker v-model="row.ex_date" type="date" value-format="YYYY-MM-DD"
+                            style="width: 100%" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column label="登记日" width="155">
+          <template #default="{ row }">
+            <el-date-picker v-model="row.record_date" type="date" value-format="YYYY-MM-DD"
+                            style="width: 100%" size="small" placeholder="可空" />
+          </template>
+        </el-table-column>
+        <el-table-column label="派息日" width="155">
+          <template #default="{ row }">
+            <el-date-picker v-model="row.pay_date" type="date" value-format="YYYY-MM-DD"
+                            style="width: 100%" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column label="每股分红" width="115">
+          <template #default="{ row }">
+            <el-input-number v-model="row.dps" :min="0" :precision="6" :controls="false"
+                             style="width: 100%" size="small" />
+          </template>
+        </el-table-column>
+        <el-table-column label="税费" width="100">
+          <template #default="{ row }">
+            <el-input-number v-model="row.tax" :min="0" :precision="2" :controls="false"
+                             style="width: 100%" size="small" placeholder="可空" />
+          </template>
+        </el-table-column>
+        <el-table-column label="状态" width="115">
+          <template #default="{ row }">
+            <el-select v-model="row.status" size="small" style="width: 100%">
+              <el-option label="已到账" value="confirmed" />
+              <el-option label="待确认" value="pending" />
+            </el-select>
+          </template>
+        </el-table-column>
+        <el-table-column label="备注" min-width="130">
+          <template #default="{ row }">
+            <el-input v-model="row.note" size="small" placeholder="选填" />
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90" fixed="right">
+          <template #default="{ $index }">
+            <el-button link type="danger" size="small" @click="removeBatchRow($index)">
+              <el-icon><Delete /></el-icon><span>删除</span>
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <div class="batch-add-row">
+        <el-button size="small" @click="addBatchRow">
+          <el-icon><Plus /></el-icon><span>新增一行</span>
+        </el-button>
+      </div>
+      <template #footer>
+        <el-button @click="batchDlg = false">取消</el-button>
+        <el-button type="primary" :loading="batchSaving" @click="saveBatch">批量保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -138,7 +212,8 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { apiDividends, apiCreateDividend, apiHoldings } from '../api'
+import { Plus, Delete } from '@element-plus/icons-vue'
+import { apiDividends, apiCreateDividend, apiCreateDividendsBatch, apiHoldings } from '../api'
 import { MARKETS, marketMap, fmt, fmtCNY, currencyMap } from '../utils/constants'
 
 const route = useRoute()
@@ -155,6 +230,9 @@ const createDlg = ref(false)
 const resultDlg = ref(false)
 const saving = ref(false)
 const result = ref(null)
+const batchDlg = ref(false)
+const batchRows = ref([])
+const batchSaving = ref(false)
 
 const currentYear = new Date().getFullYear()
 const yearOptions = Array.from({ length: 6 }, (_, i) => currentYear - i)
@@ -216,12 +294,63 @@ async function save() {
   }
 }
 
+function emptyBatchRow() {
+  return {
+    holding_id: null, ex_date: today(), record_date: '', pay_date: today(),
+    dps: undefined, tax: undefined, status: 'confirmed', note: '',
+  }
+}
+
+async function openBatch() {
+  if (!holdings.value.length) {
+    const data = await apiHoldings()
+    holdings.value = data.items || []
+  }
+  batchRows.value = Array.from({ length: 5 }, () => emptyBatchRow())
+  batchDlg.value = true
+}
+
+function addBatchRow() {
+  batchRows.value.push(emptyBatchRow())
+}
+
+function removeBatchRow(index) {
+  batchRows.value.splice(index, 1)
+}
+
+async function saveBatch() {
+  const payload = batchRows.value
+    .filter(r => r.holding_id && r.dps)
+    .map(r => {
+      const o = {
+        holding_id: r.holding_id, ex_date: r.ex_date, pay_date: r.pay_date,
+        dps: Number(r.dps), status: r.status,
+      }
+      if (r.record_date) o.record_date = r.record_date
+      if (r.tax !== undefined && r.tax !== null) o.tax = Number(r.tax)
+      if (r.note) o.note = r.note
+      return o
+    })
+  if (!payload.length) return ElMessage.warning('没有可保存的有效行（需填写持仓和每股分红）')
+  batchSaving.value = true
+  try {
+    await apiCreateDividendsBatch(payload)
+    ElMessage.success(`成功录入 ${payload.length} 条分红`)
+    batchDlg.value = false
+    load()
+  } catch (e) {
+    /* toast 统一处理 */
+  } finally {
+    batchSaving.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
 <style scoped>
 .toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
-.toolbar .el-button { margin-left: auto; }
+.toolbar .el-button:first-of-type { margin-left: auto; }
 .bold { font-weight: 500; }
 .alloc-box { padding: 8px 16px 16px 48px; background: #f8fafc; }
 .alloc-line { display: flex; gap: 24px; font-size: 13px; padding: 4px 0; color: #475569; }
@@ -229,4 +358,5 @@ onMounted(load)
 .result-box { padding: 0 16px; }
 .r-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid #f1f5f9; }
 .r-row.big { font-size: 18px; border-bottom: none; }
+.batch-add-row { margin-top: 12px; }
 </style>

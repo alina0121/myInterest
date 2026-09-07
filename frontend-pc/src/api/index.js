@@ -13,12 +13,14 @@ export const apiHolding = (id) => get(`/api/holdings/${id}`)
 export const apiDeleteHolding = (id) => del(`/api/holdings/${id}`)
 export const apiLots = (id) => get(`/api/holdings/${id}/lots`)
 export const apiCreateLot = (id, payload) => post(`/api/holdings/${id}/lots`, payload)
+export const apiCreateLotsBatch = (id, lots) => post(`/api/holdings/${id}/lots/batch`, { lots })
 export const apiUpdateLot = (lotId, payload) => httpPatch(`/api/lots/${lotId}`, payload)
 export const apiDeleteLot = (lotId) => del(`/api/lots/${lotId}`)
 
 // ---------- 分红 ----------
 export const apiDividends = (params) => get('/api/dividends', params)
 export const apiCreateDividend = (payload) => post('/api/dividends', payload)
+export const apiCreateDividendsBatch = (dividends) => post('/api/dividends/batch', { dividends })
 
 // ---------- 统计 ----------
 export const apiSummary = () => get('/api/stats/summary')
@@ -56,6 +58,8 @@ export const apiAdminSchedules = (params) => get('/api/admin/schedules', params)
 export const apiAdminCreateSchedule = (payload) => post('/api/admin/schedules', payload)
 export const apiAdminApproveSchedule = (id) => post(`/api/admin/schedules/${id}/approve`)
 export const apiAdminRejectSchedule = (id, reason) => post(`/api/admin/schedules/${id}/reject`, { reason })
+export const apiAdminBatchApprove = (ids, action, reason) =>
+  post('/api/admin/schedules/batch-approve', { ids, action, reason })
 export const apiAdminCrawl = () => post('/api/admin/schedules/crawl')
 export const apiAdminRates = () => get('/api/admin/rates')
 export const apiAdminCreateRate = (payload) => post('/api/admin/rates', payload)
