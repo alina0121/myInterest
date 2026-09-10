@@ -77,17 +77,6 @@
       <p class="hint-text">税率变更需超级管理员权限，修改后自动重算相关分红税费</p>
     </div>
 
-    <!-- 分红提醒与预告规则 -->
-    <div class="card mt20">
-      <h3>分红提醒与预告规则</h3>
-      <div class="rule-grid">
-        <label class="rule-item"><el-checkbox v-model="rules.auto_push" disabled /> 预案审核通过后自动推送给持仓用户（App 推送 / 小程序订阅消息）</label>
-        <label class="rule-item"><el-checkbox v-model="rules.remind_3d" disabled /> 派息日前 3 天、当天各提醒一次</label>
-        <label class="rule-item"><el-checkbox v-model="rules.forecast_freq" disabled /> 季派/月派股票按历史派息节奏自动生成推算预告</label>
-        <label class="rule-item"><el-checkbox v-model="rules.user_submit" disabled /> 允许用户提交预案（需人工审核）</label>
-      </div>
-    </div>
-
     <!-- 系统参数（元数据驱动：后端 config_service.SPECS 定义，前端按 type 渲染） -->
     <div class="card mt20">
       <div class="card-head">
@@ -181,7 +170,6 @@ const saving = ref(false)
 const editing = ref(null)
 const editRate = ref(0)
 const curName = { USD: '美元', HKD: '港币' }
-const rules = reactive({ auto_push: true, remind_3d: true, forecast_freq: true, user_submit: false })
 
 // ── 系统参数（后端 groups 结构 + 本地表单模型） ──
 const configGroups = ref([])          // [{ category, items: [{key,label,help,type,min,max,overridden,value,...}] }]
@@ -337,8 +325,6 @@ onMounted(() => { loadRates(); loadTax(); loadConfig() })
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
 .bold { font-weight: 600; }
 .hint-text { font-size: 12px; color: #94a3b8; margin-top: 12px; }
-.rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-.rule-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
 .cfg-group { margin-bottom: 8px; }
 .cfg-group-title { font-size: 13px; font-weight: 600; color: #0f766e; margin: 14px 0 6px;
   padding-left: 8px; border-left: 3px solid #14b8a6; }

@@ -1,10 +1,11 @@
 """分红预案采集服务（docs/06 §3.2）。
 
 P1 数据源：
-- A 股：东方财富数据中心公开接口（A股分红送配），写死在配置（源管理界面 V2）。
-- 美股：Alpha Vantage TIME_SERIES_MONTHLY_ADJUSTED（按白名单拉取近 1 年月度分红）。
-  需配置环境变量 XI_AV_API_KEY（到 https://www.alphavantage.co/support/#api-key 免费申请）。
-  无 key 则跳过美股分支并日志提示；免费层 25 次/天，白名单 5 只够用。
+- A 股：东方财富数据中心公开接口（A股分红送配），分页增量抓取
+  （按公告日倒序翻页，遇到整页都已入库即停止；page_size 走后台配置）。
+- 美股：Alpha Vantage TIME_SERIES_MONTHLY_ADJUSTED（按白名单拉取全部历史月度分红）。
+  需配置系统配置 av_api_key；留空则跳过美股分支并日志提示。
+  免费层 25 次/天，白名单 5 只够用。
 - 置信度评分：交易所/官方数据且字段完整 0.90–0.98；缺派息日 0.80；缺除权日 <0.70
 - 入库 pending；同 (market, code, ex_date) 已存在（任意状态）则跳过
 - 网络失败/离线模式（XI_CRAWL_OFFLINE=1）静默降级，不抛异常
@@ -12,7 +13,7 @@ P1 数据源：
 import logging
 import os
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import httpx
 from sqlmodel import Session, select
@@ -30,6 +31,27 @@ _CURRENCY = "CNY"
 _AV_URL = "https://www.alphavantage.co/query"
 _AV_FUN = "TIME_SERIES_MONTHLY_ADJUSTED"
 _US_CURRENCY = "USD"
+
+# A 股分页抓取安全上限：每页最多 500，最多 20 页 = 单次最多 1 万条，
+# 防止接口异常时无限翻页；正常增量抓取在遇到「整页都已入库」时即提前停止。
+_MAX_CRAWL_PAGES = 20
+
+
+def _http_get_json(url: str, params: dict, timeout: float = 10.0) -> dict:
+    """带 3 次重试的 GET，应对瞬时网络抖动；全部失败抛出最后一次异常。"""
+    last_exc: Exception | None = None
+    for attempt in range(3):
+        try:
+            resp = httpx.get(url, params=params, timeout=timeout,
+                             headers={"User-Agent": "Mozilla/5.0 (xi-dividend-tracker)"})
+            resp.raise_for_status()
+            return resp.json()
+        except Exception as e:  # noqa: BLE001
+            last_exc = e
+            if attempt < 2:
+                time.sleep(1.0 + attempt)  # 1s / 2s 退避
+    assert last_exc is not None
+    raise last_exc
 
 
 def _clean_date(v) -> str | None:
@@ -55,111 +77,145 @@ def _confidence(ex: str | None, rec: str | None, pay: str | None) -> float:
     return 0.60  # 连除权日都没有，基本只能当线索
 
 
-def crawl_a_share(session: Session, page_size: int = 100) -> tuple[int, int]:
+def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, int]:
     """抓取 A股分红送配预案，返回 (fetched, new_pending)。
 
-    fetched=抓到的有效现金分红条数；new_pending=实际新入库（去重后）条数。
-    东方财富这个接口返回的是全市场最新一页，按公告日倒序。
+    fetched=抓到的有效现金分红条数（跨页合计）；new_pending=实际新入库（去重后）条数。
+    分页策略：按公告日倒序翻页，遇到「整页都已入库（无新增无升级）」即停止增量；
+    单轮最多翻 _MAX_CRAWL_PAGES 页作为安全上限，避免接口异常时失控。
     """
-    # 东财数据中心固定参数：RPT_SHAREBONUS_DET=分红送配明细报表
-    params = {
-        "reportName": "RPT_SHAREBONUS_DET",
-        "columns": "ALL",
-        "pageSize": page_size,
-        "pageNumber": 1,
-        "sortColumns": "PLAN_NOTICE_DATE",
-        "sortTypes": "-1",  # -1=倒序，最新公告在前
-        "source": "WEB",
-        "client": "WEB",
-    }
-    resp = httpx.get(_SOURCE_URL, params=params, timeout=10.0,
-                     headers={"User-Agent": "Mozilla/5.0 (xi-dividend-tracker)"})
-    resp.raise_for_status()
-    # 返回结构：{"result": {"data": [...]}}，无数据时 result 可能为 None
-    rows = ((resp.json().get("result") or {}).get("data")) or []
+    if page_size is None:
+        page_size = config_service.get_int("crawl_a_share_page_size")
+    page_size = max(10, min(500, int(page_size)))  # 东财接口单页范围，且避免 0/负数
 
-    # ── 阶段1：解析本页，按 (代码, 报告期) 收敛 ──
-    # 同一份方案在东财表里可能出现多行（董事会决议→实施公告），
-    # 同页遇到同方案时保留「除权日等日期更全」的一行。
-    parsed: list[dict] = []
-    idx_by_key: dict[tuple[str, str], int] = {}
-    for row in rows:
-        code = str(row.get("SECURITY_CODE") or "").strip()
-        name = str(row.get("SECURITY_NAME_ABBR") or "").strip()
-        per10 = row.get("PRETAX_BONUS_RMB")  # 每 10 股税前派息（元）
-        if not code or not name or per10 in (None, "", 0):
-            continue  # 无现金分红（纯送转等）不入预案表
-        item = {
-            "code": code, "name": name,
-            "report_date": _clean_date(row.get("REPORT_DATE")),  # 方案所属报告期
-            "ex": _clean_date(row.get("EX_DIVIDEND_DATE")),
-            "rec": _clean_date(row.get("EQUITY_RECORD_DATE")),
-            # 未公告派息日先顶着除权日（可能两者都为 None）
-            "pay": _clean_date(row.get("BONUS_PAY_DATE")) or _clean_date(
-                row.get("EX_DIVIDEND_DATE")),
-            "dps": round(float(per10) / 10.0, 4),  # 东财口径「每10股」→ 每股
-            "title": str(row.get("PLAN_NOTICE_TITLE") or ""),
+    total_fetched, total_new = 0, 0
+
+    for page in range(1, _MAX_CRAWL_PAGES + 1):
+        # 东财数据中心固定参数：RPT_SHAREBONUS_DET=分红送配明细报表
+        params = {
+            "reportName": "RPT_SHAREBONUS_DET",
+            "columns": "ALL",
+            "pageSize": page_size,
+            "pageNumber": page,
+            "sortColumns": "PLAN_NOTICE_DATE",
+            "sortTypes": "-1",  # -1=倒序，最新公告在前
+            "source": "WEB",
+            "client": "WEB",
         }
-        # 同一方案多行：优先留信息更全（有除权日）的；无报告期时退回用除权日区分
-        key = (code, item["report_date"] or item["ex"] or "")
-        prev = idx_by_key.get(key)
-        if prev is not None:
-            if item["ex"] and not parsed[prev]["ex"]:
-                parsed[prev] = item  # 旧行只是预案，本行已公布除权日 → 替换升级
-            continue
-        idx_by_key[key] = len(parsed)
-        parsed.append(item)
+        data = _http_get_json(_SOURCE_URL, params)
+        # 返回结构：{"result": {"data": [...]}}，无数据时 result 可能为 None
+        rows = (data.get("result") or {}).get("data")
+        if not isinstance(rows, list) or not rows:
+            break  # 接口无更多数据
 
-    # ── 阶段2：查库去重 / 升级 / 插入 ──
-    fetched, new_pending = len(parsed), 0
-    for it in parsed:
-        ex, rec, pay, dps = it["ex"], it["rec"], it["pay"], it["dps"]
-        if ex:
-            # 已公布除权日：按 (市场,代码,除权日) 去重（任意状态，含已驳回不再捞回）
-            existing = session.exec(select(DividendSchedule).where(
-                DividendSchedule.market == _MARKET,
-                DividendSchedule.code == it["code"],
-                DividendSchedule.ex_date == ex)).first()
-            if existing:
+        # ── 阶段1：解析本页，按 (代码, 报告期) 收敛 ──
+        # 同一份方案在东财表里可能出现多行（董事会决议→实施公告），
+        # 同页遇到同方案时保留「除权日等日期更全」的一行。
+        parsed: list[dict] = []
+        idx_by_key: dict[tuple[str, str], int] = {}
+        for row in rows:
+            code = str(row.get("SECURITY_CODE") or "").strip()
+            name = str(row.get("SECURITY_NAME_ABBR") or "").strip()
+            per10 = row.get("PRETAX_BONUS_RMB")  # 每 10 股税前派息（元）
+            # 先转 float 再判断是否为 0，避免字符串 "0.00" 绕过检查插入 dps=0 垃圾
+            try:
+                per10_f = float(per10) if per10 not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                per10_f = 0.0
+            if not code or not name or per10_f <= 0:
+                continue  # 无现金分红（纯送转等）不入预案表
+            item = {
+                "code": code, "name": name,
+                "report_date": _clean_date(row.get("REPORT_DATE")),  # 方案所属报告期
+                "ex": _clean_date(row.get("EX_DIVIDEND_DATE")),
+                "rec": _clean_date(row.get("EQUITY_RECORD_DATE")),
+                # 未公告派息日先顶着除权日（可能两者都为 None）
+                "pay": _clean_date(row.get("BONUS_PAY_DATE")) or _clean_date(
+                    row.get("EX_DIVIDEND_DATE")),
+                "dps": round(per10_f / 10.0, 4),  # 东财口径「每10股」→ 每股
+                "title": str(row.get("PLAN_NOTICE_TITLE") or ""),
+            }
+            # 同一方案多行：优先留信息更全（有除权日）的；无报告期时退回用除权日区分
+            key = (code, item["report_date"] or item["ex"] or "")
+            prev = idx_by_key.get(key)
+            if prev is not None:
+                if item["ex"] and not parsed[prev]["ex"]:
+                    parsed[prev] = item  # 旧行只是预案，本行已公布除权日 → 替换升级
                 continue
-            # 同金额的旧「未定日」预案（董事会阶段先爬到）→ 原地补全，不新增
-            pending_one = session.exec(select(DividendSchedule).where(
-                DividendSchedule.market == _MARKET,
-                DividendSchedule.code == it["code"],
-                DividendSchedule.dps == dps,
-                DividendSchedule.ex_date == None,  # noqa: E711
-                DividendSchedule.status == "pending",
-                DividendSchedule.source == "crawler")
-                .order_by(DividendSchedule.id.desc())).first()  # type: ignore
-            if pending_one is not None:
-                pending_one.ex_date = ex
-                pending_one.record_date = rec
-                pending_one.pay_date = pay
-                pending_one.confidence = _confidence(ex, rec, pay)  # 0.60 → 0.95
-                session.add(pending_one)
-                continue
-        else:
-            # 纯预案（除权日未公布）：按 (代码,每股金额,未定日) 去重，任意状态
-            # 都不再捞回（否则定时任务每天两次重复堆积、驳回的垃圾也会复活）
-            existing = session.exec(select(DividendSchedule).where(
-                DividendSchedule.market == _MARKET,
-                DividendSchedule.code == it["code"],
-                DividendSchedule.dps == dps,
-                DividendSchedule.ex_date == None,  # noqa: E711
-                DividendSchedule.source == "crawler")).first()
-            if existing:
-                continue
-        title = it["title"] or f"{it['name']} 分红送配预案"
-        session.add(DividendSchedule(
-            market=_MARKET, code=it["code"], name=it["name"],
-            ex_date=ex, record_date=rec, pay_date=pay, dps=dps,
-            currency=_CURRENCY, div_type="cash", source="crawler",
-            confidence=_confidence(ex, rec, pay), status="pending",
-            raw_title=title[:200],  # 留痕：出问题可回溯是哪条公告
-        ))
-        new_pending += 1
-    session.commit()
-    return fetched, new_pending
+            idx_by_key[key] = len(parsed)
+            parsed.append(item)
+
+        # ── 阶段2：查库去重 / 升级 / 插入 ──
+        page_inserts, page_upgrades = 0, 0
+        for it in parsed:
+            ex, rec, pay, dps = it["ex"], it["rec"], it["pay"], it["dps"]
+            if ex:
+                # 已公布除权日：按 (市场,代码,除权日) 去重（任意状态，含已驳回不再捞回）
+                existing = session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == _MARKET,
+                    DividendSchedule.code == it["code"],
+                    DividendSchedule.ex_date == ex)).first()
+                if existing:
+                    continue
+                # 同金额的旧「未定日」预案（董事会阶段先爬到）→ 原地补全，不新增
+                pending_one = session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == _MARKET,
+                    DividendSchedule.code == it["code"],
+                    DividendSchedule.dps == dps,
+                    DividendSchedule.ex_date == None,  # noqa: E711
+                    DividendSchedule.status == "pending",
+                    DividendSchedule.source == "crawler")
+                    .order_by(DividendSchedule.id.desc())).first()  # type: ignore
+                if pending_one is not None:
+                    pending_one.ex_date = ex
+                    pending_one.record_date = rec
+                    pending_one.pay_date = pay
+                    pending_one.confidence = _confidence(ex, rec, pay)  # 0.60 → 0.95
+                    session.add(pending_one)
+                    page_upgrades += 1
+                    continue
+            else:
+                # 纯预案（除权日未公布）：若同代码同金额「已有除权日」的更完整记录存在，
+                # 直接跳过（防止已公告除权日的记录与未定日预案重复入库）；
+                # 否则按 (代码,金额,未定日) 去重，任意状态都不再捞回
+                # （否则定时任务每天两次重复堆积、驳回的垃圾也会复活）
+                has_better = session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == _MARKET,
+                    DividendSchedule.code == it["code"],
+                    DividendSchedule.dps == dps,
+                    DividendSchedule.ex_date != None)).first()  # noqa: E711
+                if has_better:
+                    continue
+                existing = session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == _MARKET,
+                    DividendSchedule.code == it["code"],
+                    DividendSchedule.dps == dps,
+                    DividendSchedule.ex_date == None,  # noqa: E711
+                    DividendSchedule.source == "crawler")).first()
+                if existing:
+                    continue
+            title = it["title"] or f"{it['name']} 分红送配预案"
+            session.add(DividendSchedule(
+                market=_MARKET, code=it["code"], name=it["name"],
+                ex_date=ex, record_date=rec, pay_date=pay, dps=dps,
+                currency=_CURRENCY, div_type="cash", source="crawler",
+                confidence=_confidence(ex, rec, pay), status="pending",
+                raw_title=title[:200],  # 留痕：出问题可回溯是哪条公告
+            ))
+            page_inserts += 1
+
+        total_fetched += len(parsed)
+        total_new += page_inserts
+        session.commit()  # 每页提交一次，后续页失败不丢失已抓进度
+
+        # 增量停止条件：本页既无新增也无升级 → 后续更老的页必然也都已入库
+        if page_inserts == 0 and page_upgrades == 0:
+            break
+        # 末页不足一页 → 没有更多数据
+        if len(rows) < page_size:
+            break
+
+    return total_fetched, total_new
 
 
 def crawl_us_stock(session: Session) -> tuple[int, int]:
@@ -175,8 +231,6 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
                  "(后台系统配置或 XI_AV_API_KEY，申请 https://www.alphavantage.co/support/#api-key)")
         return 0, 0
 
-    today = datetime.utcnow().date()
-    range_start = (today - timedelta(days=365)).strftime("%Y-%m-%d")  # 只拉近 1 年
     fetched, new_pending = 0, 0
     tickers = config_service.get_list("crawl_us_tickers")  # 后台可配的白名单
     sleep_sec = config_service.get_int("crawl_us_rate_sleep")
@@ -206,8 +260,8 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
             continue
 
         for date_str, item in series.items():
-            if date_str < range_start:
-                continue
+            # AV 一次返回全部历史月线，全量入库（"按历史预测分红"需要足够样本）；
+            # 已存在（任意状态）的按 (代码, 近似除权日) 去重跳过。
             try:
                 amount = float(item.get("7. dividend amount", 0) or 0)
             except (TypeError, ValueError):

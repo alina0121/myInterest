@@ -1,4 +1,4 @@
-"""分红预案用户端接口（docs/04 §五）：即将到账 + 全市场查询。"""
+"""分红预案用户端接口（docs/04 §五）：即将到账 + 全市场查询 + 用户提交。"""
 from datetime import date as Date
 
 from fastapi import APIRouter, Depends
@@ -6,8 +6,9 @@ from sqlmodel import Session, select
 
 from ..database import get_session
 from ..models import Dividend, DividendSchedule, Holding, User
-from ..services import fx_service, schedule_service
-from ..utils.errors import ok
+from ..schemas import ScheduleUserSubmitIn
+from ..services import config_service, fx_service, schedule_service
+from ..utils.errors import AppError, Codes, ok
 from ..utils.timeutil import today_str
 from .deps import get_current_user
 
@@ -65,6 +66,34 @@ def upcoming(session: Session = Depends(get_session),
     # 派息日缺失时退回用除权日排序，同日期再按代码排，顺序稳定
     items.sort(key=lambda x: (x["pay_date"] or x["ex_date"], x["code"]))
     return ok({"items": items, "month_total_cny": round(month_total, 2)})
+
+
+@router.post("")
+def submit_schedule(body: ScheduleUserSubmitIn,
+                    session: Session = Depends(get_session),
+                    user: User = Depends(get_current_user)):
+    """用户提交预案（docs/04 §5.3）：进入待审核队列，由管理员审核。
+
+    受系统配置 user_submit 控制；关闭时返回 403。
+    """
+    if not config_service.get_bool("user_submit"):
+        raise AppError(Codes.FORBIDDEN, "当前未开放用户提交预案", status=403)
+    sch = DividendSchedule(
+        market=body.market, code=body.code, name=body.name,
+        ex_date=str(body.ex_date) if body.ex_date else None,
+        record_date=str(body.record_date) if body.record_date else None,
+        pay_date=str(body.pay_date) if body.pay_date else None,
+        dps=body.dps, currency=body.currency, div_type="cash",
+        source="user_submit", submitted_by=user.id,
+        confidence=0.60,  # 用户提交置信度较低，需人工审核
+        status="pending",
+        raw_title=(body.note or f"{body.name} 分红预案")[:200],
+    )
+    session.add(sch)
+    session.commit()
+    session.refresh(sch)
+    return ok({"id": sch.id, "status": sch.status,
+               "message": "预案已提交，等待管理员审核"})
 
 
 @router.get("")

@@ -328,8 +328,9 @@ def approve_schedule(sid: int, background_tasks: BackgroundTasks, request: Reque
          {"market": s.market, "code": s.code, "ex_date": s.ex_date, "dps": s.dps})
     session.commit()
     session.refresh(s)
-    # 发布后异步触发全体相关用户 auto-match（docs/06 §3.2）
-    background_tasks.add_task(schedule_service.auto_match_all_background)
+    # 发布后异步触发全体相关用户 auto-match（受系统配置 auto_push 控制）
+    if config_service.get_bool("auto_push"):
+        background_tasks.add_task(schedule_service.auto_match_all_background)
     return ok(schedule_out(session, s))
 
 
@@ -379,7 +380,7 @@ def batch_approve_schedules(body: ScheduleBatchApproveIn,
         session.add(s)
         handled.append(s)
     session.commit()
-    if body.action == "publish":
+    if body.action == "publish" and config_service.get_bool("auto_push"):
         background_tasks.add_task(schedule_service.auto_match_all_background)
     return ok({
         "action": body.action,

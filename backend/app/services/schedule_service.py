@@ -2,14 +2,21 @@
 
 - auto-match：扫描已发布预案，为持有对应标的的用户生成 pending 分红（幂等）
 - estimate：按归属算法预估某持仓在某预案下的股数/税前/税后（不落库）
+- generate_forecast_schedules：季派/月派持仓按历史派息节奏生成推算预案
+- check_dividend_reminders：派息日前 3 天/当天提醒检查
 """
+import logging
+from datetime import date as Date, timedelta
 from sqlmodel import Session, select
 
-from ..models import (Dividend, DividendSchedule, Holding, Lot, UserSetting)
+from ..models import (Dividend, DividendSchedule, Holding, Lot, User, UserSetting)
 from ..utils.timeutil import hold_days, today_str
+from . import config_service
 from .dividend_service import (BUY_DIRS, apply_allocation, compute_eligible,
                                default_record_date, tax_rate_for)
 from .money import r2, r4
+
+log = logging.getLogger("xi.schedule")
 
 
 def effective_record_date(sch: DividendSchedule, market: str) -> str:
@@ -127,3 +134,91 @@ def run_daily_job() -> None:
         except Exception:  # pragma: no cover - 定时任务不允许中断
             pass
         auto_match(session)
+        generate_forecast_schedules(session)
+        check_dividend_reminders(session)
+
+
+def generate_forecast_schedules(session: Session) -> int:
+    """季派/月派持仓按历史派息节奏生成推算预案（受系统配置 forecast_freq 控制）。
+
+    对 freq 为 monthly/quarterly 的持仓，取最近一笔已确认分红的派息日，
+    叠加对应间隔（月派 1 个月 / 季派 3 个月）推算下一次派息日，
+    生成一条 pending 预案（source=forecast，需人工审核）。
+    幂等：同 (market, code, ex_date) 已存在任意状态预案则跳过。
+    返回生成条数。
+    """
+    if not config_service.get_bool("forecast_freq"):
+        return 0
+    today = today_str()
+    interval_map = {"monthly": 30, "quarterly": 90}
+    holdings = session.exec(select(Holding).where(
+        Holding.freq.in_(("monthly", "quarterly")))).all()  # type: ignore
+    created = 0
+    for h in holdings:
+        days = interval_map[h.freq]
+        last_div = session.exec(
+            select(Dividend).where(Dividend.holding_id == h.id,
+                                   Dividend.status == "confirmed")
+            .order_by(Dividend.pay_date.desc())  # type: ignore
+        ).first()
+        if last_div is None or not last_div.pay_date:
+            continue
+        try:
+            next_pay = (Date.fromisoformat(last_div.pay_date)
+                        + timedelta(days=days)).isoformat()
+        except ValueError:
+            continue
+        if next_pay <= today:
+            continue  # 推算日已过，等下一轮
+        # 幂等：同标的同推算除权日已存在预案则跳过
+        exists = session.exec(select(DividendSchedule).where(
+            DividendSchedule.market == h.market,
+            DividendSchedule.code == h.code,
+            DividendSchedule.ex_date == next_pay)).first()
+        if exists:
+            continue
+        session.add(DividendSchedule(
+            market=h.market, code=h.code, name=h.name,
+            ex_date=next_pay, pay_date=next_pay,
+            dps=r4(last_div.dps),
+            currency=h.currency, div_type="cash", source="forecast",
+            confidence=0.65, status="pending",
+            raw_title=f"{h.name} {h.freq} 推算预案（基于历史派息节奏）"[:200],
+        ))
+        created += 1
+    session.commit()
+    if created:
+        log.info("forecast schedules generated: %d", created)
+    return created
+
+
+def check_dividend_reminders(session: Session) -> int:
+    """派息日前 3 天 / 当天提醒检查（受系统配置 remind_3d 控制）。
+
+    扫描 pay_date 在 [今天, 今天+3] 的已发布预案，对持仓且开启提醒的用户
+    记录日志（实际推送通道 V2 接入）。返回触发提醒的用户数。
+    """
+    if not config_service.get_bool("remind_3d"):
+        return 0
+    today = today_str()
+    window_end = (Date.fromisoformat(today) + timedelta(days=3)).isoformat()
+    schedules = session.exec(select(DividendSchedule).where(
+        DividendSchedule.status == "published",
+        DividendSchedule.pay_date != None,  # noqa: E711
+        DividendSchedule.pay_date >= today,
+        DividendSchedule.pay_date <= window_end)).all()
+    if not schedules:
+        return 0
+    reminded_users: set[int] = set()
+    for sch in schedules:
+        holdings = session.exec(select(Holding).where(
+            Holding.market == sch.market, Holding.code == sch.code)).all()
+        for h in holdings:
+            setting = session.get(UserSetting, h.user_id)
+            # 用户未开启推送或未开启派息日提醒 → 跳过
+            if setting and (not setting.push_enabled or not setting.remind_on_payday):
+                continue
+            reminded_users.add(h.user_id)
+            log.info("dividend reminder: user=%s %s %s pay_date=%s",
+                     h.user_id, sch.code, sch.name, sch.pay_date)
+    return len(reminded_users)

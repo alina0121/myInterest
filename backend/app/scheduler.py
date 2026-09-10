@@ -43,7 +43,9 @@ def _run_job() -> None:
 
 def run_daily_job_with_session(session) -> None:
     from .services import crawler_service
-    from .services.schedule_service import auto_match
+    from .services.schedule_service import (auto_match,
+                                             check_dividend_reminders,
+                                             generate_forecast_schedules)
     try:
         result = crawler_service.run_crawl(session)
         log.info("scheduled crawl: %s", result)
@@ -55,6 +57,18 @@ def run_daily_job_with_session(session) -> None:
                  result["matched"], result["skipped"])
     except Exception:
         log.exception("scheduled auto-match failed")
+    try:
+        n = generate_forecast_schedules(session)
+        if n:
+            log.info("scheduled forecast: generated=%d", n)
+    except Exception:
+        log.exception("scheduled forecast failed")
+    try:
+        n = check_dividend_reminders(session)
+        if n:
+            log.info("scheduled reminders: users=%d", n)
+    except Exception:
+        log.exception("scheduled reminders failed")
 
 
 async def _loop() -> None:  # pragma: no cover - 后台循环

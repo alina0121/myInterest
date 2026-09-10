@@ -163,6 +163,19 @@ class ScheduleAdminCreate(BaseModel):
     raw_title: Optional[str] = None
 
 
+class ScheduleUserSubmitIn(BaseModel):
+    """用户提交预案（docs/04 §5.3）：进入待审核队列，需管理员审核。"""
+    market: Market
+    code: str = Field(min_length=1, max_length=16)
+    name: str = Field(min_length=1, max_length=64)
+    ex_date: Optional[Date] = None
+    record_date: Optional[Date] = None
+    pay_date: Optional[Date] = None
+    dps: float = Field(gt=0)
+    currency: Currency = "CNY"
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
 class ScheduleRejectIn(BaseModel):
     reason: str = Field(min_length=1, max_length=200)
 

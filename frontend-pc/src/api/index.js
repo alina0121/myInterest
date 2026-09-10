@@ -36,6 +36,8 @@ export const apiCalendar = (year, month) => get('/api/calendar', { year, month }
 
 // ---------- 预案（用户端） ----------
 export const apiUpcoming = () => get('/api/schedules/upcoming')
+export const apiSchedules = (params) => get('/api/schedules', params)
+export const apiSubmitSchedule = (payload) => post('/api/schedules', payload)
 
 // ---------- 公告/反馈 ----------
 export const apiAnnouncements = () => get('/api/announcements')

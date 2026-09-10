@@ -306,3 +306,88 @@ def test_crawl_offline_returns_zero(client):
     assert r["code"] == 0
     assert r["data"]["fetched"] == 0
     assert "离线" in r["data"]["message"]
+
+
+# ---------- 系统配置开关生效验证 ----------
+
+
+def test_user_submit_config_gate(client):
+    """user_submit 关闭时用户提交预案返回 403；开启后可提交 pending。"""
+    from app.services import config_service
+    user_token = register(client, "usr_submit")
+
+    # 关闭：403
+    config_service.set_values(_session(), {"user_submit": False}, admin_id=1)
+    r = client.post("/api/schedules", headers=auth(user_token), json={
+        "market": "a_share", "code": "600000", "name": "浦发银行", "dps": 0.3})
+    assert r.status_code == 403
+
+    # 开启：创建 pending，source=user_submit
+    config_service.set_values(_session(), {"user_submit": True}, admin_id=1)
+    r = client.post("/api/schedules", headers=auth(user_token), json={
+        "market": "a_share", "code": "600000", "name": "浦发银行", "dps": 0.3}).json()
+    assert r["code"] == 0 and r["data"]["status"] == "pending"
+
+    # 清理
+    config_service.reset_value(_session(), "user_submit", admin_id=1)
+
+
+def test_forecast_freq_gate(client):
+    """forecast_freq 关闭时不生成推算预案；开启后为季派/月派持仓生成。"""
+    from app.database import engine
+    from app.models import Dividend, DividendSchedule, Holding, Lot
+    from app.services import config_service, schedule_service
+    from sqlmodel import Session, select
+
+    user_token = register(client, "usr_fc")
+    # 建一个季派持仓 + 一笔历史已确认分红
+    hid = client.post("/api/holdings", headers=auth(user_token), json={
+        "market": "a_share", "code": "601398", "name": "工商银行",
+        "currency": "CNY", "freq": "quarterly",
+        "first_lot": {"trade_date": "2024-01-01", "shares": 1000, "price": 5.0}}).json()["data"]["id"]
+    from datetime import date, timedelta
+    pay = (date.today() - timedelta(days=80)).isoformat()
+    with Session(engine) as s:
+        s.add(Dividend(user_id=_uid(client, user_token), holding_id=hid,
+                       ex_date=pay, record_date=pay, pay_date=pay, dps=0.26,
+                       status="confirmed", currency="CNY"))
+        s.commit()
+
+    # 关闭：0 条
+    config_service.set_values(_session(), {"forecast_freq": False}, admin_id=1)
+    assert schedule_service.generate_forecast_schedules(_session()) == 0
+
+    # 开启：生成 1 条推算预案（90 天后）
+    config_service.set_values(_session(), {"forecast_freq": True}, admin_id=1)
+    n = schedule_service.generate_forecast_schedules(_session())
+    assert n == 1
+    with Session(engine) as s:
+        sch = s.exec(select(DividendSchedule).where(
+            DividendSchedule.code == "601398",
+            DividendSchedule.source == "forecast")).first()
+        assert sch and sch.status == "pending"
+
+    # 幂等：再跑一次不重复
+    assert schedule_service.generate_forecast_schedules(_session()) == 0
+    config_service.reset_value(_session(), "forecast_freq", admin_id=1)
+
+
+def test_remind_3d_gate(client):
+    """remind_3d 关闭时不触发提醒；开启时正常返回提醒用户数（>=0）。"""
+    from app.services import config_service, schedule_service
+    config_service.set_values(_session(), {"remind_3d": False}, admin_id=1)
+    assert schedule_service.check_dividend_reminders(_session()) == 0
+    # 开启时返回非负整数（共享库可能有符合条件的预案）
+    config_service.set_values(_session(), {"remind_3d": True}, admin_id=1)
+    assert schedule_service.check_dividend_reminders(_session()) >= 0
+    config_service.reset_value(_session(), "remind_3d", admin_id=1)
+
+
+def _session():
+    from app.database import engine
+    from sqlmodel import Session
+    return Session(engine)
+
+
+def _uid(client, token):
+    return client.get("/api/auth/me", headers=auth(token)).json()["data"]["id"]
