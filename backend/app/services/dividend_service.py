@@ -29,10 +29,13 @@ def tax_rate_for(session: Session, market: str, hold_days_: int) -> Decimal:
         select(TaxRule).where(TaxRule.market == market, TaxRule.enabled == 1)
     ).all()
     for r in rules:
+        # 区间匹配：hold_min_days ~ hold_max_days（上限 NULL 表示不限）
+        # 例：A股「1个月~1年」= [31, 365]；「>1年」= [366, NULL]
         lo = r.hold_min_days if r.hold_min_days is not None else 0
         hi = r.hold_max_days
         if hold_days_ >= lo and (hi is None or hold_days_ <= hi):
             return d(r.rate)
+    # tax_rules 表缺数据时的兜底（不阻断记账）：A股按天数从长到短命中第一档
     if market == "a_share":
         for min_days, rate in _FALLBACK_A_SHARE:
             if hold_days_ >= min_days:
@@ -50,19 +53,20 @@ def compute_eligible(lots: list[Lot], record_date: str) -> tuple[dict[int, float
 
     sells（trade_date <= record_date）按 FIFO 从最早买入批次核销。
     """
+    # 只统计登记日（含）之前成交的批次；之后买入的不参与本次分红
     buys = [l for l in lots if l.direction in BUY_DIRS and l.trade_date <= record_date]
-    remaining = {l.id: float(l.shares) for l in buys}
-    order = [l.id for l in buys]
+    remaining = {l.id: float(l.shares) for l in buys}  # 每个买入批次「尚未被卖出核销」的股数
+    order = [l.id for l in buys]                        # FIFO 核销顺序：按成交日从早到晚
     sells = [l for l in lots if l.direction == "sell" and l.trade_date <= record_date]
     for s in sells:
-        need = float(s.shares)
-        for lid in order:
-            if need <= 1e-9:
+        need = float(s.shares)  # 这笔卖出还要核销多少股
+        for lid in order:       # 从最早的买入批次开始扣
+            if need <= 1e-9:    # 1e-9 为浮点容差：扣到 0 即停（避免 0.0000001 残差继续循环）
                 break
-            take = min(remaining[lid], need)
+            take = min(remaining[lid], need)  # 本批次能被扣掉的股数
             remaining[lid] -= take
             need -= take
-    eligible = sum(remaining.values())
+    eligible = sum(remaining.values())  # 登记日收盘仍持有的净股数 = 可参与分红股数
     return remaining, eligible
 
 
@@ -85,12 +89,14 @@ def apply_allocation(session: Session, div: Dividend) -> None:
     new_allocs = []
     for lot in lots:
         if lot.direction not in BUY_DIRS:
-            continue
+            continue  # 卖出批次本身不参与分红，只是上面用来核销买入
         shares = remaining.get(lot.id, 0.0)
         if shares <= 1e-9:
             continue  # 已被卖出核销完或尚未买入（晚于登记日）→ 不产生归属行
         shares = r4(shares)
-        gross = r2(shares * float(dps))
+        gross = r2(shares * float(dps))  # 该批次税前分红 = 登记日仍持股数 × 每股分红
+        # 税率按「该批次持有天数」分档：持有天数 = 买入日 → 股权登记日 的自然日数
+        # （同一笔分红里，早买的批次持有久、税率低；晚买的批次可能全额计税）
         rate = tax_rate_for(session, holding.market, hold_days(lot.trade_date, rd))
         tax = r2(Decimal(str(gross)) * rate)
         new_allocs.append(DividendAllocation(
@@ -99,15 +105,18 @@ def apply_allocation(session: Session, div: Dividend) -> None:
             net=r2(Decimal(str(gross)) - Decimal(str(tax))),
         ))
 
+    # 重算场景：先删旧明细再插新明细，保证同一笔分红重复计算结果幂等
     for old in session.exec(select(DividendAllocation)
                             .where(DividendAllocation.dividend_id == div.id)).all():
         session.delete(old)
     session.add_all(new_allocs)
     session.flush()
 
+    # 回填分红主表汇总字段（明细之和），供列表页直接展示，无需每次聚合
     div.eligible_shares = r4(eligible)
     div.gross_amount = r2(sum(Decimal(str(a.gross)) for a in new_allocs))
     if not div.tax_overridden:
+        # 用户手工改过税费（tax_overridden=1）时保留手填值，重算只更新股数与税前
         div.tax = r2(sum(Decimal(str(a.tax)) for a in new_allocs))
     div.net_amount = r2(Decimal(str(div.gross_amount)) - Decimal(str(div.tax)))
     div.updated_at = div.updated_at  # 保持原值，由调用方负责

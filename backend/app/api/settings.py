@@ -13,6 +13,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
 def _get_or_create(session: Session, user_id: int) -> UserSetting:
+    """取用户设置；老用户（注册时尚无设置行的历史数据）则懒创建一份默认设置。"""
     s = session.exec(select(UserSetting).where(UserSetting.user_id == user_id)).first()
     if s is None:
         s = UserSetting(user_id=user_id)
@@ -23,6 +24,7 @@ def _get_or_create(session: Session, user_id: int) -> UserSetting:
 
 
 def _settings_out(s: UserSetting) -> dict:
+    # 库里开关是 0/1 整数，出参统一转 bool 给前端直接 v-if 用
     return {"remind_before_days": s.remind_before_days,
             "remind_on_payday": bool(s.remind_on_payday),
             "auto_match_schedule": bool(s.auto_match_schedule),

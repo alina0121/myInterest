@@ -18,6 +18,7 @@ import httpx
 from sqlmodel import Session, select
 
 from ..models import DividendSchedule
+from . import config_service
 from ..utils.timeutil import now_str, today_str
 
 log = logging.getLogger("xi.crawler")
@@ -26,12 +27,9 @@ _SOURCE_URL = "https://datacenter-web.eastmoney.com/api/data/v1/get"
 _MARKET = "a_share"
 _CURRENCY = "CNY"
 
-# 美股派息白名单（蓝筹股 + 知名派息股，Alpha Vantage 免费层 25 次/天，控制在 5 只内）
-_US_TICKERS = ["AAPL", "MSFT", "JNJ", "KO", "PG"]
 _AV_URL = "https://www.alphavantage.co/query"
 _AV_FUN = "TIME_SERIES_MONTHLY_ADJUSTED"
 _US_CURRENCY = "USD"
-_AV_RATE_SLEEP = 12  # Alpha Vantage 限速 5 次/分钟，串行 sleep 12 秒
 
 
 def _clean_date(v) -> str | None:
@@ -47,61 +45,117 @@ def _clean_date(v) -> str | None:
 
 
 def _confidence(ex: str | None, rec: str | None, pay: str | None) -> float:
+    """数据置信度：关键日期越完整越可信。低于 0.8 的后台审核时需重点核对。"""
     if ex and rec and pay:
         return 0.95
     if ex and rec:
         return 0.85
     if ex:
         return 0.70
-    return 0.60
+    return 0.60  # 连除权日都没有，基本只能当线索
 
 
 def crawl_a_share(session: Session, page_size: int = 100) -> tuple[int, int]:
-    """抓取 A股分红送配预案，返回 (fetched, new_pending)。"""
+    """抓取 A股分红送配预案，返回 (fetched, new_pending)。
+
+    fetched=抓到的有效现金分红条数；new_pending=实际新入库（去重后）条数。
+    东方财富这个接口返回的是全市场最新一页，按公告日倒序。
+    """
+    # 东财数据中心固定参数：RPT_SHAREBONUS_DET=分红送配明细报表
     params = {
         "reportName": "RPT_SHAREBONUS_DET",
         "columns": "ALL",
         "pageSize": page_size,
         "pageNumber": 1,
         "sortColumns": "PLAN_NOTICE_DATE",
-        "sortTypes": "-1",
+        "sortTypes": "-1",  # -1=倒序，最新公告在前
         "source": "WEB",
         "client": "WEB",
     }
     resp = httpx.get(_SOURCE_URL, params=params, timeout=10.0,
                      headers={"User-Agent": "Mozilla/5.0 (xi-dividend-tracker)"})
     resp.raise_for_status()
+    # 返回结构：{"result": {"data": [...]}}，无数据时 result 可能为 None
     rows = ((resp.json().get("result") or {}).get("data")) or []
 
-    fetched, new_pending = 0, 0
-    seen: set[tuple[str, str]] = set()
+    # ── 阶段1：解析本页，按 (代码, 报告期) 收敛 ──
+    # 同一份方案在东财表里可能出现多行（董事会决议→实施公告），
+    # 同页遇到同方案时保留「除权日等日期更全」的一行。
+    parsed: list[dict] = []
+    idx_by_key: dict[tuple[str, str], int] = {}
     for row in rows:
         code = str(row.get("SECURITY_CODE") or "").strip()
         name = str(row.get("SECURITY_NAME_ABBR") or "").strip()
         per10 = row.get("PRETAX_BONUS_RMB")  # 每 10 股税前派息（元）
         if not code or not name or per10 in (None, "", 0):
             continue  # 无现金分红（纯送转等）不入预案表
-        ex = _clean_date(row.get("EX_DIVIDEND_DATE"))
-        rec = _clean_date(row.get("EQUITY_RECORD_DATE"))
-        pay = _clean_date(row.get("BONUS_PAY_DATE")) or ex
-        dps = round(float(per10) / 10.0, 4)
-        key = (code, ex or "")
-        if key in seen:
+        item = {
+            "code": code, "name": name,
+            "report_date": _clean_date(row.get("REPORT_DATE")),  # 方案所属报告期
+            "ex": _clean_date(row.get("EX_DIVIDEND_DATE")),
+            "rec": _clean_date(row.get("EQUITY_RECORD_DATE")),
+            # 未公告派息日先顶着除权日（可能两者都为 None）
+            "pay": _clean_date(row.get("BONUS_PAY_DATE")) or _clean_date(
+                row.get("EX_DIVIDEND_DATE")),
+            "dps": round(float(per10) / 10.0, 4),  # 东财口径「每10股」→ 每股
+            "title": str(row.get("PLAN_NOTICE_TITLE") or ""),
+        }
+        # 同一方案多行：优先留信息更全（有除权日）的；无报告期时退回用除权日区分
+        key = (code, item["report_date"] or item["ex"] or "")
+        prev = idx_by_key.get(key)
+        if prev is not None:
+            if item["ex"] and not parsed[prev]["ex"]:
+                parsed[prev] = item  # 旧行只是预案，本行已公布除权日 → 替换升级
             continue
-        seen.add(key)
-        fetched += 1
-        if ex and session.exec(select(DividendSchedule).where(
+        idx_by_key[key] = len(parsed)
+        parsed.append(item)
+
+    # ── 阶段2：查库去重 / 升级 / 插入 ──
+    fetched, new_pending = len(parsed), 0
+    for it in parsed:
+        ex, rec, pay, dps = it["ex"], it["rec"], it["pay"], it["dps"]
+        if ex:
+            # 已公布除权日：按 (市场,代码,除权日) 去重（任意状态，含已驳回不再捞回）
+            existing = session.exec(select(DividendSchedule).where(
                 DividendSchedule.market == _MARKET,
-                DividendSchedule.code == code,
-                DividendSchedule.ex_date == ex)).first():
-            continue  # 已存在（任意状态）→ 跳过
-        title = row.get("PLAN_NOTICE_TITLE") or f"{name} 分红送配预案"
+                DividendSchedule.code == it["code"],
+                DividendSchedule.ex_date == ex)).first()
+            if existing:
+                continue
+            # 同金额的旧「未定日」预案（董事会阶段先爬到）→ 原地补全，不新增
+            pending_one = session.exec(select(DividendSchedule).where(
+                DividendSchedule.market == _MARKET,
+                DividendSchedule.code == it["code"],
+                DividendSchedule.dps == dps,
+                DividendSchedule.ex_date == None,  # noqa: E711
+                DividendSchedule.status == "pending",
+                DividendSchedule.source == "crawler")
+                .order_by(DividendSchedule.id.desc())).first()  # type: ignore
+            if pending_one is not None:
+                pending_one.ex_date = ex
+                pending_one.record_date = rec
+                pending_one.pay_date = pay
+                pending_one.confidence = _confidence(ex, rec, pay)  # 0.60 → 0.95
+                session.add(pending_one)
+                continue
+        else:
+            # 纯预案（除权日未公布）：按 (代码,每股金额,未定日) 去重，任意状态
+            # 都不再捞回（否则定时任务每天两次重复堆积、驳回的垃圾也会复活）
+            existing = session.exec(select(DividendSchedule).where(
+                DividendSchedule.market == _MARKET,
+                DividendSchedule.code == it["code"],
+                DividendSchedule.dps == dps,
+                DividendSchedule.ex_date == None,  # noqa: E711
+                DividendSchedule.source == "crawler")).first()
+            if existing:
+                continue
+        title = it["title"] or f"{it['name']} 分红送配预案"
         session.add(DividendSchedule(
-            market=_MARKET, code=code, name=name,
+            market=_MARKET, code=it["code"], name=it["name"],
             ex_date=ex, record_date=rec, pay_date=pay, dps=dps,
             currency=_CURRENCY, div_type="cash", source="crawler",
             confidence=_confidence(ex, rec, pay), status="pending",
-            raw_title=str(title)[:200],
+            raw_title=title[:200],  # 留痕：出问题可回溯是哪条公告
         ))
         new_pending += 1
     session.commit()
@@ -112,22 +166,25 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
     """抓取美股分红预案（Alpha Vantage TIME_SERIES_MONTHLY_ADJUSTED）。
 
     每月数据含 "7. dividend amount" 字段，非零即当月有分红。
-    需配置 XI_AV_API_KEY；无 key 则跳过并日志提示。
-    返回 (fetched, new_pending)。
+    API Key 取系统配置 av_api_key（后台可配），其次环境变量 XI_AV_API_KEY；
+    未配置则跳过并日志提示。返回 (fetched, new_pending)。
     """
-    api_key = os.getenv("XI_AV_API_KEY", "").strip()
+    api_key = config_service.get_text("av_api_key").strip()
     if not api_key:
-        log.info("us_stock crawl skipped: XI_AV_API_KEY not set "
-                 "(申请 https://www.alphavantage.co/support/#api-key)")
+        log.info("us_stock crawl skipped: av_api_key not configured "
+                 "(后台系统配置或 XI_AV_API_KEY，申请 https://www.alphavantage.co/support/#api-key)")
         return 0, 0
 
     today = datetime.utcnow().date()
-    range_start = (today - timedelta(days=365)).strftime("%Y-%m-%d")
+    range_start = (today - timedelta(days=365)).strftime("%Y-%m-%d")  # 只拉近 1 年
     fetched, new_pending = 0, 0
+    tickers = config_service.get_list("crawl_us_tickers")  # 后台可配的白名单
+    sleep_sec = config_service.get_int("crawl_us_rate_sleep")
 
-    for i, ticker in enumerate(_US_TICKERS):
-        if i > 0:
-            time.sleep(_AV_RATE_SLEEP)  # 限速 5 次/分钟
+    # 串行拉白名单：Alpha Vantage 免费层限 5 次/分钟、25 次/天
+    for i, ticker in enumerate(tickers):
+        if i > 0 and sleep_sec > 0:
+            time.sleep(sleep_sec)  # 限速间隔（后台可配）
         try:
             resp = httpx.get(_AV_URL, params={
                 "function": _AV_FUN, "symbol": ticker, "apikey": api_key,
@@ -208,7 +265,7 @@ def run_crawl(session: Session) -> dict:
         total_new += n
     except Exception as e:
         log.warning("us_stock crawl failed: %s", e)
-        errors.append("us_stock: Alpha Vantage 暂时不可用或未配置 XI_AV_API_KEY")
+        errors.append("us_stock: Alpha Vantage 暂时不可用或未配置 API Key")
 
     msg = "；".join(errors) if errors else None
     return {"fetched": total_fetched, "new_pending": total_new, "crawled_at": now_str(),

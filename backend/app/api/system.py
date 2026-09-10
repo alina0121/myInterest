@@ -17,9 +17,9 @@ def get_rates(date: str | None = None,
               user: User = Depends(get_current_user)):
     day = date or today_str()
     rates = {}
-    sources = []
+    sources = []  # 每个币种汇率的实际来源：frankfurter/manual/fallback，便于前端标注
     for base in ("USD", "HKD"):
-        rate = fx_service.get_rate_cny(session, base, day)
+        rate = fx_service.get_rate_cny(session, base, day)  # 触发 DB→在线→兜底 四级降级
         rates[base] = float(rate)
         row = session.exec(
             select(ExchangeRate).where(ExchangeRate.base == base,

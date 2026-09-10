@@ -15,6 +15,11 @@ def add_days(date_iso: str, days: int) -> str:
 
 
 def hold_days(from_date: str, to_date: str) -> int:
+    """持有天数（自然日）= to_date - from_date。
+
+    分红计税口径：from=批次买入日，to=股权登记日。
+    例：买入 2026-01-01、登记日 2026-02-05 → 持有 35 天，落在 A股「1个月~1年」档（10%）。
+    """
     return (date.fromisoformat(to_date) - date.fromisoformat(from_date)).days
 
 

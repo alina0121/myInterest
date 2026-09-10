@@ -6,7 +6,7 @@ from sqlmodel import Session, select
 
 from ..models import Dividend, Holding
 from ..utils.timeutil import days_ago_iso, today_str
-from . import fx_service
+from . import config_service, fx_service
 from .lots_service import computed_summary
 from .money import r2, r4
 
@@ -37,6 +37,13 @@ def _net_cny(session: Session, div: Dividend) -> Decimal:
 
 
 def summary(session: Session, user_id: int) -> dict:
+    """看板汇总（docs/04 §6.1）。金额一律税后折 CNY；
+
+    - year_dividend_cny：本年已到账税后分红（按派息日年份归属）
+    - year_growth：同比 = (本年 - 去年) / 去年；去年为 0 时返回 None（不做除零）
+    - ttm_dividend_cny / ttm_monthly_avg：近 365 天税后分红 / 12（月均）
+    - next_month_forecast_cny：下月预告，取 pending 分红的【税前】折 CNY
+    """
     divs = _user_confirmed(session, user_id)
     year = today_str()[:4]
     prev_year = str(int(year) - 1)
@@ -102,6 +109,7 @@ def monthly_trend(session: Session, user_id: int, rng: str = "12m") -> dict:
 
 
 def by_market(session: Session, user_id: int) -> dict:
+    """市场分红占比：分红表本身不存 market，需经 holding_id 反查持仓的市场。"""
     holdings = {h.id: h.market for h in
                 session.exec(select(Holding).where(Holding.user_id == user_id)).all()}
     agg: dict[str, Decimal] = {}
@@ -116,15 +124,18 @@ def forecast(session: Session, user_id: int) -> dict:
     """未来 12 个月预测（docs/03 §6）。
 
     P0：published 全 0（预案表 P1 接入）；estimated 按近 3 年同月 dps 均值 × 当前持仓。
+    后台关闭 forecast_by_history 时，estimated 直接全 0（只保留已公告预案口径）。
     """
     months = _last_months(1)  # placeholder to get current month key
     cur = months[0]
     future = [_month_add(cur, i) for i in range(1, 13)]
+    history_enabled = config_service.get_bool("forecast_by_history")
     cutoff = (date.today() - timedelta(days=3 * 365)).isoformat()
 
     estimated = [Decimal("0")] * 12
     freq_summary: dict[str, int] = {}
-    holdings = list(session.exec(select(Holding).where(Holding.user_id == user_id)).all())
+    holdings = (list(session.exec(select(Holding).where(Holding.user_id == user_id)).all())
+                if history_enabled else [])
 
     for h in holdings:
         freq_summary[h.freq] = freq_summary.get(h.freq, 0) + 1
@@ -183,8 +194,10 @@ def yield_ranking(session: Session, user_id: int) -> dict:
             continue
         divs = [d for d in _user_confirmed(session, user_id) if d.holding_id == h.id]
         year_div_cny = sum(_net_cny(session, d) for d in divs if d.pay_date[:4] == year)
+        # 现价股息率 = TTM 每股分红 / 手填现价（没填现价则为 None，前端显示「—」）
         yield_price = (r4(cs["ttm_dps"] / h.current_price)
                        if h.current_price and h.current_price > 0 else None)
+        # 当前市值（折 CNY）= 现价 × 净持仓 × 当日汇率
         market_value = (r2(Decimal(str(h.current_price)) * Decimal(str(cs["shares_now"]))
                            * fx_service.get_rate_cny(session, h.currency, today))
                         if h.current_price else None)

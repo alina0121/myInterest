@@ -1,6 +1,6 @@
 """Pydantic 请求模型（入参白名单校验，docs/04 各接口入参表）。"""
 from datetime import date as Date
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -200,3 +200,8 @@ class RateManualIn(BaseModel):
 class TaxRuleUpdate(BaseModel):
     rate: Optional[float] = Field(default=None, ge=0, le=1)
     enabled: Optional[int] = Field(default=None, ge=0, le=1)
+
+
+class ConfigUpdateIn(BaseModel):
+    """系统配置批量更新：{配置key: 新值}，敏感项传空串表示不修改。"""
+    items: dict[str, Any] = Field(min_length=1)

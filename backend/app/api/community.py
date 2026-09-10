@@ -18,7 +18,11 @@ def feedback_out(f: Feedback) -> dict:
 
 @router.get("/announcements")
 def list_announcements(session: Session = Depends(get_session)):
-    """已发布公告，按发布时间倒序（docs/04 §10.1）。"""
+    """已发布公告，按发布时间倒序（docs/04 §10.1）。
+
+    注意：此接口【不需要登录】（无 get_current_user 依赖），
+    供登录页/小程序首页在未登录状态也能看到系统公告。
+    """
     items = session.exec(
         select(Announcement).where(Announcement.status == "published")
         .order_by(Announcement.published_at.desc())  # type: ignore

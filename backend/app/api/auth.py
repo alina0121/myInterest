@@ -8,10 +8,10 @@ import httpx
 from fastapi import APIRouter, Depends, Request
 from sqlmodel import Session, or_, select
 
-from ..config import WX_APPID, WX_MOCK, WX_SECRET
 from ..database import get_session
 from ..models import User, UserSetting
 from ..schemas import LoginIn, RefreshIn, RegisterIn, WxLoginIn
+from ..services import config_service
 from ..utils.errors import AppError, Codes, ok
 from ..utils.security import (create_refresh_token, decode_token, hash_password,
                               token_pair, verify_password)
@@ -20,18 +20,21 @@ from .deps import get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
-# 简单内存限流：每 IP 每 60 秒 10 次（docs/01 §5）
+# 简单内存限流：每 IP 每 60 秒 N 次（阈值后台可配 login_rate_limit_per_min）
+# 滑动窗口：deque 存该 IP 最近的请求时间戳，每次请求先清掉 60 秒外的，
+# 剩下的 >=阈值 就拒绝。单机够用；多进程部署需换 Redis（V2）
 _lock = threading.Lock()
 _hits: dict[str, deque] = defaultdict(deque)
 
 
 def _rate_limit(request: Request) -> None:
+    limit = config_service.get_int("login_rate_limit_per_min")
     ip = request.client.host if request.client else "unknown"
-    with _lock:
+    with _lock:  # 多线程下保护 deque
         q, now = _hits[ip], time.time()
         while q and now - q[0] > 60:
-            q.popleft()
-        if len(q) >= 10:
+            q.popleft()  # 丢掉窗口外的旧记录
+        if len(q) >= limit:
             raise AppError(Codes.SERVER_ERROR, "请求过于频繁，请稍后再试", status=429)
         q.append(now)
 
@@ -58,19 +61,21 @@ def register(body: RegisterIn, request: Request,
                 password_hash=hash_password(body.password),
                 nickname=body.nickname or body.username)
     session.add(user)
-    session.flush()
-    session.add(UserSetting(user_id=user.id))
+    session.flush()  # 先 flush 拿到 user.id，才能建 1:1 的设置行
+    session.add(UserSetting(user_id=user.id))  # 每个新用户配一份默认设置（提醒/自动匹配开关）
     session.commit()
     session.refresh(user)
-    return ok({"user": _user_out(user), **token_pair(user.id)})
+    return ok({"user": _user_out(user), **token_pair(user.id)})  # 注册即登录，直接发双 token
 
 
 @router.post("/login")
 def login(body: LoginIn, request: Request, session: Session = Depends(get_session)):
     _rate_limit(request)
+    # account 字段用户名/邮箱都能登录，所以用 or_ 两个条件一起查
     user = session.exec(select(User).where(
         or_(User.username == body.account, User.email == body.account))).first()
     if user is None or not verify_password(body.password, user.password_hash):
+        # 用户不存在和密码错误返回同一句话，防止被枚举出哪些用户名已注册
         raise AppError(Codes.BAD_CREDENTIALS, "用户名或密码错误", status=401)
     if user.status == "banned":
         raise AppError(Codes.FORBIDDEN, "账号已封禁，请联系管理员", status=403)
@@ -143,14 +148,24 @@ def wx_login(body: WxLoginIn, request: Request,
 
 
 def _wx_code2openid(code: str) -> str | None:
-    """调用微信 code2session 接口换取 openid；mock 模式直接返回 code。"""
-    if WX_MOCK:
+    """调用微信 code2session 接口换取 openid；mock 模式直接返回 code。
+
+    mock 条件：环境变量 XI_WX_MOCK=1（测试/开发强制），
+    或后台未配置 wx_appid / wx_secret。
+    """
+    import os
+    if os.getenv("XI_WX_MOCK", "") == "1":
         return code
+    appid = config_service.get_text("wx_appid").strip()
+    secret = config_service.get_text("wx_secret").strip()
+    if not appid or not secret:
+        return code  # 未配置微信凭证 → mock 模式（code 直接当 openid）
     try:
         resp = httpx.get(
             "https://api.weixin.qq.com/sns/jscode2session",
-            params={"appid": WX_APPID, "secret": WX_SECRET,
-                    "js_code": code, "grant_type": "authorization_code"},
+            params={"appid": appid, "secret": secret,
+                    "js_code": code,
+                    "grant_type": "authorization_code"},
             timeout=8.0,
         )
         data = resp.json()

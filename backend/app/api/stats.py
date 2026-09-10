@@ -1,4 +1,8 @@
-"""统计接口（docs/04 §六）。"""
+"""统计接口（docs/04 §六）。
+
+本文件是纯薄路由：只负责鉴权 + 转发，所有计算口径都在 services/stats_service.py。
+改统计逻辑请去 service 层改，这里不要写业务。
+"""
 from fastapi import APIRouter, Depends
 from sqlmodel import Session
 

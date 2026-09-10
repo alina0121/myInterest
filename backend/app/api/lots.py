@@ -101,12 +101,14 @@ def update_lot(lot_id: int, body: LotUpdate, session: Session = Depends(get_sess
     new_price = changes.get("price", lot.price)
     new_shares = changes.get("shares", lot.shares)
     _check_buy_price(new_direction, new_price)
+    # 编辑卖出单时排除自身：否则这张卖出单会把自己也算进「已卖出数量」导致误拦
     lots_service.validate_sell(session, lot.holding_id, new_direction, new_shares,
                                exclude_lot_id=lot.id)
     for k, v in changes.items():
         setattr(lot, k, v)
     session.add(lot)
     session.commit()
+    # 交易日可能被改早或改晚：取新旧较早的那天起重算，保证两边的分红都覆盖
     from_date = min(old_date, lot.trade_date)
     dividend_service.recalc_holding_dividends(session, lot.holding_id, from_date)
     session.refresh(lot)

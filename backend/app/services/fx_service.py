@@ -11,9 +11,7 @@ from sqlmodel import Session, select
 
 from ..config import FX_API_BASE, FX_OFFLINE
 from ..models import ExchangeRate
-
-# 兜底值：离线/接口故障时保证统计可用
-FALLBACK = {"USD": Decimal("7.1200"), "HKD": Decimal("0.9128")}
+from . import config_service
 
 
 def fetch_rate_http(base: str, quote: str, date_iso: str) -> Decimal | None:
@@ -39,9 +37,17 @@ def fetch_latest_rate(base: str, quote: str = "CNY") -> float | None:
 
 
 def get_rate_cny(session: Session, base: str, date_iso: str) -> Decimal:
-    """返回 1 base = ? CNY；CNY 本身返回 1。结果落库缓存。"""
+    """返回 1 base = ? CNY；CNY 本身返回 1。结果落库缓存。
+
+    取数按四级降级，保证离线也能出统计：
+      ① DB 中 <= 当日的最近一条汇率（派息日落在周末/假日时取前一交易日）
+      ② 在线拉取当日汇率并写入 exchange_rates 缓存
+      ③ DB 中任意日期的最近一条（远期兜底）
+      ④ 系统配置中的兜底汇率（后台可改，库完全为空时）
+    """
     if base == "CNY":
         return Decimal("1")
+    # ① 历史汇率：rate_date <= 派息日，取最近一天
     row = session.exec(
         select(ExchangeRate)
         .where(ExchangeRate.base == base, ExchangeRate.quote == "CNY",
@@ -51,6 +57,7 @@ def get_rate_cny(session: Session, base: str, date_iso: str) -> Decimal:
     if row:
         return Decimal(str(row.rate))
 
+    # ② DB 没有 → 在线拉取并缓存，下次同一日期直接命中 ①
     fetched = fetch_rate_http(base, "CNY", date_iso)
     if fetched is not None:
         session.add(ExchangeRate(base=base, quote="CNY", rate=float(fetched),
@@ -58,6 +65,7 @@ def get_rate_cny(session: Session, base: str, date_iso: str) -> Decimal:
         session.commit()
         return fetched
 
+    # ③ 在线失败 → 退而求其次用库里最近的任意日期汇率
     row_any = session.exec(
         select(ExchangeRate)
         .where(ExchangeRate.base == base, ExchangeRate.quote == "CNY")
@@ -65,9 +73,18 @@ def get_rate_cny(session: Session, base: str, date_iso: str) -> Decimal:
     ).first()
     if row_any:
         return Decimal(str(row_any.rate))
-    return FALLBACK.get(base, Decimal("1"))
+    # ④ 全部不可用 → 系统配置里的兜底汇率，统计页面不致于报错
+    key = "fx_fallback_usd" if base == "USD" else "fx_fallback_hkd" if base == "HKD" else None
+    if key:
+        return config_service.get_float(key)
+    return Decimal("1")
 
 
 def to_cny(session: Session, amount: float, currency: str, date_iso: str) -> Decimal:
+    """原币金额按「date_iso 当日汇率」折算人民币，返回 2 位小数 Decimal。
+
+    历史分红统一用派息日（pay_date）汇率，而非今天汇率，
+    保证「去年的美元分红」按去年的汇率入账，不随汇率波动漂移。
+    """
     return (Decimal(str(amount)) * get_rate_cny(session, currency, date_iso)
             ).quantize(Decimal("0.01"))

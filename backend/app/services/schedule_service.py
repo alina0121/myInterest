@@ -58,19 +58,21 @@ def auto_match(session: Session, user_id: int | None = None) -> dict:
         select(DividendSchedule)
         .where(DividendSchedule.status == "published",
                DividendSchedule.ex_date != None,  # noqa: E711
-               DividendSchedule.dps != None)  # noqa: E711
+               DividendSchedule.dps != None)  # noqa: E711  要素不全的预案不参与自动匹配
         .order_by(DividendSchedule.ex_date)  # type: ignore
     ).all()
     if not schedules:
         return {"matched": 0, "created": [], "skipped": 0}
 
+    # 一次性把用户持仓捞出来，按 (市场, 代码) 建索引，
+    # 避免「预案数 × 持仓数」地反复查库
     holding_stmt = select(Holding)
     if user_id is not None:
         holding_stmt = holding_stmt.where(Holding.user_id == user_id)
     holdings = session.exec(holding_stmt).all()
     by_key: dict[tuple[str, str], list[Holding]] = {}
     for h in holdings:
-        by_key.setdefault((h.market, h.code), []).append(h)
+        by_key.setdefault((h.market, h.code), []).append(h)  # 同一标的可能在多个账户持有
 
     created, skipped, matched = [], 0, 0
     for sch in schedules:
@@ -85,10 +87,12 @@ def auto_match(session: Session, user_id: int | None = None) -> dict:
                 Dividend.schedule_id == sch.id)).first()
             if exists:
                 continue
+            # 登记日没有可参与分红的持仓（如股票已清仓）→ 跳过并计数
             est = estimate_for_holding(session, holding, sch)
             if est is None:
                 skipped += 1
                 continue
+            # 生成的是 pending（待到账）：派息实际到账后由用户确认转 confirmed
             div = Dividend(
                 user_id=holding.user_id, holding_id=holding.id, schedule_id=sch.id,
                 ex_date=sch.ex_date, record_date=effective_record_date(sch, holding.market),
@@ -97,8 +101,8 @@ def auto_match(session: Session, user_id: int | None = None) -> dict:
                 source="auto_schedule", status="pending",
             )
             session.add(div)
-            session.flush()
-            apply_allocation(session, div)
+            session.flush()       # 先拿到 div.id，归属明细才能挂上去
+            apply_allocation(session, div)  # 预生成批次归属明细（预估税费）
             created.append({"schedule_id": sch.id, "holding_id": holding.id,
                             "net_amount": div.net_amount})
             matched += 1

@@ -71,3 +71,8 @@ export const apiAdminUpdateAnnouncement = (id, payload) => httpPatch(`/api/admin
 export const apiAdminFeedback = (params) => get('/api/admin/feedback', params)
 export const apiAdminHandleFeedback = (id, payload) => httpPatch(`/api/admin/feedback/${id}`, payload)
 export const apiAdminLogs = (params) => get('/api/admin/logs', params)
+
+// ---------- 系统配置（仅 super_admin 可写，admin 只读） ----------
+export const apiAdminConfig = () => get('/api/admin/config')
+export const apiAdminUpdateConfig = (items) => put('/api/admin/config', { items })
+export const apiAdminResetConfig = (key) => del(`/api/admin/config/${key}`)

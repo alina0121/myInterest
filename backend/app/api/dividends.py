@@ -50,26 +50,32 @@ def list_dividends(year: int | None = None, market: str | None = None,
                    page: int = 1, page_size: int = 20, expand: str | None = None,
                    session: Session = Depends(get_session),
                    user: User = Depends(get_current_user)):
+    # 先把该用户所有持仓捞成 id→Holding 映射：市场筛选、出参拼名称都要用，
+    # 避免逐条分红再查一次持仓（N+1 查询）
     holdings = {h.id: h for h in
                 session.exec(select(Holding).where(Holding.user_id == user.id)).all()}
+    # 列表默认按派息日倒序：最近到账的在最前面
     divs = list(session.exec(
         select(Dividend).where(Dividend.user_id == user.id)
         .order_by(Dividend.pay_date.desc(), Dividend.id.desc())  # type: ignore
     ).all())
 
+    # 以下为可选过滤条件（可叠加），在内存里收窄
     if holding_id is not None:
         divs = [d for d in divs if d.holding_id == holding_id]
     elif market is not None:
         ids = {hid for hid, h in holdings.items() if h.market == market}
         divs = [d for d in divs if d.holding_id in ids]
     if year is not None:
-        divs = [d for d in divs if d.pay_date[:4] == str(year)]
+        divs = [d for d in divs if d.pay_date[:4] == str(year)]  # 按派息日年份归属
     if status is not None:
         divs = [d for d in divs if d.status == status]
 
+    # 内存分页（个人分红条数有限，不值得 SQL 分页）
     total = len(divs)
     start = (page - 1) * page_size
     slice_ = divs[start:start + page_size]
+    # expand=allocations 时列表也带批次明细，默认不带以减小响应体
     want_alloc = expand is not None and "allocations" in expand
     return ok({
         "items": [dividend_out(session, d, holdings[d.holding_id], want_alloc)
@@ -179,8 +185,10 @@ def confirm_dividend(dividend_id: int, body: ConfirmIn,
     d = get_owned_dividend(session, user, dividend_id)
     if d.status == "confirmed":
         raise AppError(Codes.VALIDATION, "该分红已确认", status=422)
+    # pending → confirmed：预告分红真实到账后确认，此后才计入「已实现」统计
     d.status = "confirmed"
     if body.actual_net is not None:
+        # 用户按券商实际到账金额回填：以实际到账为准，倒推真实税费
         d.net_amount = round(body.actual_net, 2)
         d.tax = round(d.gross_amount - body.actual_net, 2)
         d.tax_overridden = 1

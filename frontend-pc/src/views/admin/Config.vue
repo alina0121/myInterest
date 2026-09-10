@@ -88,6 +88,53 @@
       </div>
     </div>
 
+    <!-- 系统参数（元数据驱动：后端 config_service.SPECS 定义，前端按 type 渲染） -->
+    <div class="card mt20">
+      <div class="card-head">
+        <h3>系统参数</h3>
+        <el-button v-if="canWrite" type="primary" :loading="cfgSaving" @click="saveConfig">保存修改</el-button>
+      </div>
+      <p v-if="!canWrite" class="hint-text" style="color:#d97706;margin-top:0">
+        当前角色为管理员，系统参数只读；修改需超级管理员。
+      </p>
+      <div v-loading="configLoading">
+        <div v-for="g in configGroups" :key="g.category" class="cfg-group">
+          <div class="cfg-group-title">{{ g.category }}</div>
+          <div v-for="item in g.items" :key="item.key" class="cfg-item">
+            <div class="cfg-label">
+              <span>{{ item.label }}</span>
+              <el-tag v-if="item.overridden" type="warning" size="small" effect="plain">已自定义</el-tag>
+              <el-button v-if="canWrite && item.overridden" link type="danger" size="small"
+                         @click="resetCfg(item)">恢复默认</el-button>
+            </div>
+            <div class="cfg-ctrl">
+              <!-- 布尔：开关 -->
+              <el-switch v-if="item.type === 'bool'" v-model="formModel[item.key]" :disabled="!canWrite"
+                         active-text="开" inactive-text="关" inline-prompt />
+              <!-- 整数：数字输入（范围来自后端元数据 min/max） -->
+              <el-input-number v-else-if="item.type === 'int'" v-model="formModel[item.key]"
+                               :min="item.min ?? undefined" :max="item.max ?? undefined" :step="1"
+                               :controls="false" :disabled="!canWrite" style="width: 200px" />
+              <!-- 小数：数字输入（兜底汇率等） -->
+              <el-input-number v-else-if="item.type === 'float'" v-model="formModel[item.key]"
+                               :min="item.min ?? undefined" :max="item.max ?? undefined" :step="0.01"
+                               :precision="4" :controls="false" :disabled="!canWrite" style="width: 200px" />
+              <!-- 敏感字符串：脱敏展示，留空保存=不修改原值 -->
+              <el-input v-else-if="sensitiveOf(item)" v-model="formModel[item.key]"
+                        :placeholder="item.has_value ? `当前 ${item.mask}（留空表示不修改）` : '未配置，请填写'"
+                        :disabled="!canWrite" show-password autocomplete="new-password" style="width: 320px" />
+              <!-- 普通字符串 -->
+              <el-input v-else v-model="formModel[item.key]" :disabled="!canWrite" style="width: 320px" />
+            </div>
+            <div class="cfg-help">{{ item.help }}</div>
+          </div>
+        </div>
+      </div>
+      <p class="hint-text">
+        修改保存后 60 秒内全局生效（多数开关立即生效）；敏感信息脱敏显示，所有修改记录操作日志。
+      </p>
+    </div>
+
     <!-- 手动录入汇率 -->
     <el-dialog v-model="addRateDlg" title="手动录入汇率" width="420">
       <el-form label-width="80px">
@@ -113,10 +160,16 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
-import { apiAdminRates, apiAdminCreateRate, apiAdminRefreshRates, apiAdminTaxRules, apiAdminUpdateTaxRule } from '../../api'
+import { onMounted, reactive, ref, computed } from 'vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { apiAdminRates, apiAdminCreateRate, apiAdminRefreshRates, apiAdminTaxRules, apiAdminUpdateTaxRule,
+  apiAdminConfig, apiAdminUpdateConfig, apiAdminResetConfig } from '../../api'
 import { marketMap } from '../../utils/constants'
+import { useUserStore } from '../../store/user'
+
+const userStore = useUserStore()
+// 仅超级管理员可写系统参数；普通管理员进来只读
+const canWrite = computed(() => userStore.user?.role === 'super_admin')
 
 const rates = ref([])
 const taxRules = ref([])
@@ -129,6 +182,75 @@ const editing = ref(null)
 const editRate = ref(0)
 const curName = { USD: '美元', HKD: '港币' }
 const rules = reactive({ auto_push: true, remind_3d: true, forecast_freq: true, user_submit: false })
+
+// ── 系统参数（后端 groups 结构 + 本地表单模型） ──
+const configGroups = ref([])          // [{ category, items: [{key,label,help,type,min,max,overridden,value,...}] }]
+const configLoading = ref(false)
+const cfgSaving = ref(false)
+const formModel = reactive({})        // key → 当前编辑值（敏感项初始为空串）
+const sensitiveKeys = new Set()       // 敏感配置 key（av_api_key/wx_secret）
+
+function sensitiveOf(item) {
+  return sensitiveKeys.has(item.key)
+}
+
+async function loadConfig() {
+  configLoading.value = true
+  try {
+    const { groups } = await apiAdminConfig()
+    applyGroups(groups)
+  } finally { configLoading.value = false }
+}
+
+// 用后端返回的 groups 回填表单
+function applyGroups(groups) {
+  configGroups.value = groups || []
+  sensitiveKeys.clear()
+  for (const g of configGroups.value) {
+    for (const item of g.items) {
+      // 后端对敏感项返回 mask 字段（非敏感项无此字段），据此识别并清空本地输入
+      if (item.mask !== undefined) sensitiveKeys.add(item.key)
+      formModel[item.key] = sensitiveOf(item) ? '' : item.value
+    }
+  }
+}
+
+async function saveConfig() {
+  // 只提交「真正变化」的项：否则未改项也会被写成 DB 覆盖值，错误地显示「已自定义」
+  const items = {}
+  for (const g of configGroups.value) {
+    for (const item of g.items) {
+      const v = formModel[item.key]
+      if (sensitiveOf(item)) {
+        // 敏感项：输入非空才提交（空串 = 保持原值，后端同约定）
+        const t = (v || '').trim()
+        if (t) items[item.key] = t
+      } else if (v === null || v === undefined || v === '') {
+        return ElMessage.warning(`「${item.label}」不能留空`)
+      } else if (JSON.stringify(v) !== JSON.stringify(item.value)) {
+        items[item.key] = v
+      }
+    }
+  }
+  if (!Object.keys(items).length) return ElMessage.info('没有需要保存的修改')
+  cfgSaving.value = true
+  try {
+    const { groups } = await apiAdminUpdateConfig(items)
+    applyGroups(groups)
+    ElMessage.success('配置已保存')
+  } catch (e) { /* toast 已统一 */ } finally { cfgSaving.value = false }
+}
+
+async function resetCfg(item) {
+  try {
+    await ElMessageBox.confirm(`将「${item.label}」恢复为环境变量/默认值？`, '恢复默认', { type: 'warning' })
+  } catch { return }
+  try {
+    const { groups } = await apiAdminResetConfig(item.key)
+    applyGroups(groups)
+    ElMessage.success('已恢复默认')
+  } catch (e) { /* toast 已统一 */ }
+}
 
 const rateForm = reactive({ base: 'USD', rate: undefined, rate_date: '' })
 
@@ -196,7 +318,7 @@ async function toggleTax(row) {
   } catch (e) { /* toast 已统一 */ }
 }
 
-onMounted(() => { loadRates(); loadTax() })
+onMounted(() => { loadRates(); loadTax(); loadConfig() })
 </script>
 
 <style scoped>
@@ -217,4 +339,11 @@ onMounted(() => { loadRates(); loadTax() })
 .hint-text { font-size: 12px; color: #94a3b8; margin-top: 12px; }
 .rule-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 .rule-item { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; color: #475569; }
+.cfg-group { margin-bottom: 8px; }
+.cfg-group-title { font-size: 13px; font-weight: 600; color: #0f766e; margin: 14px 0 6px;
+  padding-left: 8px; border-left: 3px solid #14b8a6; }
+.cfg-item { display: grid; grid-template-columns: 250px 340px 1fr; gap: 12px; align-items: center;
+  padding: 9px 4px; border-bottom: 1px dashed #e2e8f0; }
+.cfg-label { display: flex; align-items: center; gap: 8px; font-size: 13px; color: #334155; font-weight: 500; }
+.cfg-help { font-size: 12px; color: #94a3b8; line-height: 1.5; }
 </style>

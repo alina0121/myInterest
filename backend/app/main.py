@@ -39,6 +39,7 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
 
+# 统一响应包络：成功 {"code":0,...}，失败也走同一结构，前端只认 code 字段
 def _envelope(code: int, msg: str, status: int) -> JSONResponse:
     return JSONResponse(status_code=status,
                         content={"code": code, "msg": msg, "data": None})
@@ -52,6 +53,7 @@ async def app_error_handler(_request: Request, exc: AppError):
 
 @app.exception_handler(Exception)
 async def unhandled_handler(request: Request, exc: Exception):  # pragma: no cover
+    # 兜底：任何没料到的异常都不向前端吐堆栈，统一 500
     return _envelope(Codes.SERVER_ERROR, "服务器内部错误", 500)
 
 

@@ -19,9 +19,11 @@ def upcoming(session: Session = Depends(get_session),
              user: User = Depends(get_current_user)):
     """我的即将到账：仅返回当前用户持有标的的已发布预案（docs/04 §5.1）。"""
     today = today_str()
+    # 用户持仓按 (市场,代码) 建索引：全市场预案只保留「我持有」的
     holdings = session.exec(select(Holding).where(Holding.user_id == user.id)).all()
     by_key = {(h.market, h.code): h for h in holdings}
 
+    # 只看已发布且要素完整（有除权日 + dps）的预案
     schedules = session.exec(
         select(DividendSchedule)
         .where(DividendSchedule.status == "published",
@@ -35,13 +37,14 @@ def upcoming(session: Session = Depends(get_session),
     for sch in schedules:
         holding = by_key.get((sch.market, sch.code))
         if holding is None:
-            continue
+            continue  # 没持有这只票，与我无关
         eff = sch.pay_date or sch.ex_date  # 排序/月份归集用
         if eff < today:
-            continue
+            continue  # 已过期的预案不展示在「即将到账」
         est = schedule_service.estimate_for_holding(session, holding, sch)
         if est is None:
-            continue
+            continue  # 登记日没有可参与的持仓（如登记日后才建仓）
+        # 该预案是否已生成过分红记录：前端据此隐藏「一键生成」按钮，避免重复
         has_record = session.exec(select(Dividend).where(
             Dividend.holding_id == holding.id,
             Dividend.schedule_id == sch.id)).first() is not None
@@ -51,12 +54,15 @@ def upcoming(session: Session = Depends(get_session),
             "ex_date": sch.ex_date, "pay_date": sch.pay_date,
             "dps": sch.dps, "currency": sch.currency,
             **est, "has_dividend_record": has_record,
+            # 距派息还剩几天（前端做倒计时/提醒高亮）
             "days_to_pay": (Date.fromisoformat(eff) - Date.fromisoformat(today)).days
             if eff else None,
         })
+        # 本月预计到账合计（税后折 CNY），看板卡片用
         if eff and eff[:7] == month:
             month_total += float(fx_service.to_cny(session, est["est_net"],
                                                    sch.currency, eff))
+    # 派息日缺失时退回用除权日排序，同日期再按代码排，顺序稳定
     items.sort(key=lambda x: (x["pay_date"] or x["ex_date"], x["code"]))
     return ok({"items": items, "month_total_cny": round(month_total, 2)})
 

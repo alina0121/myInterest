@@ -23,6 +23,7 @@ def get_lots(session: Session, holding_id: int) -> list[Lot]:
 
 
 def shares_now(lots: list[Lot]) -> float:
+    """当前净持仓股数：买入/送股加，卖出减（不落库，实时聚合）。"""
     total = 0.0
     for l in lots:
         if l.direction in BUY_DIRS:
@@ -33,7 +34,11 @@ def shares_now(lots: list[Lot]) -> float:
 
 
 def cost_total(lots: list[Lot]) -> float:
-    """总投入 = Σ 买入数量×价格 + 费用（卖出不冲减成本）。"""
+    """总投入 = Σ 买入数量×价格 + 费用。
+
+    口径：只统计 direction=buy 的真金白银投入；
+    送股（bonus_share）价格为 0 自然不计；卖出回款不冲减成本（成本股息率分母用）。
+    """
     return r2(sum((l.shares * l.price + l.fee) for l in lots if l.direction == "buy"))
 
 
@@ -84,6 +89,7 @@ def lot_out(session: Session, lot: Lot) -> dict:
     allocs = session.exec(
         select(DividendAllocation).where(DividendAllocation.lot_id == lot.id)
     ).all()
+    # 批次金额：买入=成交额+费用；卖出批次的费用通常已在回款中扣除，此处不再加
     amount = lot.shares * lot.price + (lot.fee if lot.direction == "buy" else 0)
     return {
         "id": lot.id,
@@ -93,6 +99,6 @@ def lot_out(session: Session, lot: Lot) -> dict:
         "price": lot.price,
         "fee": lot.fee,
         "amount": r2(amount),
-        "lot_dividend": r2(sum(a.net for a in allocs)),
+        "lot_dividend": r2(sum(a.net for a in allocs)),  # 该批次历史累计分到的税后红利
         "note": lot.note,
     }

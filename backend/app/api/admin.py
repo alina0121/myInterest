@@ -15,10 +15,11 @@ from sqlmodel import Session, func, select
 from ..database import get_session
 from ..models import (AdminOperationLog, Announcement, Dividend, DividendSchedule,
                       ExchangeRate, Feedback, Holding, Lot, TaxRule, User)
-from ..schemas import (AnnouncementCreate, AnnouncementUpdate, FeedbackHandleIn,
-                       RateManualIn, ScheduleAdminCreate, ScheduleBatchApproveIn,
-                       ScheduleRejectIn, TaxRuleUpdate)
-from ..services import crawler_service, fx_service, lots_service, schedule_service
+from ..schemas import (AnnouncementCreate, AnnouncementUpdate, ConfigUpdateIn,
+                       FeedbackHandleIn, RateManualIn, ScheduleAdminCreate,
+                       ScheduleBatchApproveIn, ScheduleRejectIn, TaxRuleUpdate)
+from ..services import (config_service, crawler_service, fx_service, lots_service,
+                        schedule_service)
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.security import hash_password
 from ..utils.timeutil import add_days, days_ago_iso, now_str, today_str
@@ -311,6 +312,8 @@ def approve_schedule(sid: int, background_tasks: BackgroundTasks, request: Reque
         raise AppError(Codes.VALIDATION, "该预案已发布", status=422)
     if not s.ex_date or not s.dps:
         raise AppError(Codes.VALIDATION, "缺少除权日或每股分红，无法发布", status=422)
+    # 发布前防重：同一 (市场,代码,除权日) 只能有一条 published
+    # （DB 层还有部分唯一索引 uq_sch_published 兜底）
     dup = session.exec(select(DividendSchedule).where(
         DividendSchedule.market == s.market, DividendSchedule.code == s.code,
         DividendSchedule.ex_date == s.ex_date,
@@ -514,6 +517,38 @@ def admin_update_tax_rule(rule_id: int, body: TaxRuleUpdate, request: Request,
     out = _tax_rule_out(rule)
     out["note"] = "税率修改仅对新分红计算生效，不追溯历史分红"
     return ok(out)
+
+
+# ---------- 11.4 系统配置（key-value，元数据驱动） ----------
+@router.get("/config")
+def admin_list_config(session: Session = Depends(get_session),
+                      admin: User = Depends(get_admin_user)):
+    """系统配置：admin 可读；敏感值脱敏（只回传 has_value/mask，不回传原文）。"""
+    return ok({"groups": config_service.admin_view()})
+
+
+@router.put("/config")
+def admin_update_config(body: ConfigUpdateIn, request: Request,
+                        session: Session = Depends(get_session),
+                        admin: User = Depends(require_super_admin)):
+    """批量保存系统配置：仅 super_admin；敏感项留空=不修改。即时生效并落操作日志。"""
+    changed = config_service.set_values(session, body.items, admin_id=admin.id)
+    # 日志只记配置键，不记值（避免密钥等敏感值落日志库）
+    _log(session, admin, request, "config.update", "system_config", None,
+         {"keys": changed})
+    session.commit()
+    return ok({"changed": changed, "groups": config_service.admin_view()})
+
+
+@router.delete("/config/{key}")
+def admin_reset_config(key: str, request: Request,
+                       session: Session = Depends(get_session),
+                       admin: User = Depends(require_super_admin)):
+    """单项重置：删除 DB 覆盖，回退到环境变量/内置默认。"""
+    config_service.reset_value(session, key, admin_id=admin.id)
+    _log(session, admin, request, "config.reset", "system_config", None, {"key": key})
+    session.commit()
+    return ok({"groups": config_service.admin_view()})
 
 
 # ---------- 11.5 公告 ----------

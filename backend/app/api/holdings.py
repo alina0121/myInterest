@@ -100,6 +100,9 @@ def update_holding(holding_id: int, body: HoldingUpdate,
 def delete_holding(holding_id: int, session: Session = Depends(get_session),
                    user: User = Depends(get_current_user)):
     h = get_owned_holding(session, user, holding_id)
+    # 手动级联删除，顺序按外键依赖反着来：分红明细 → 分红 → 批次 → 持仓
+    # （SQLite 默认外键不强制 ON DELETE 连锁，且 allocations.lot_id 是 SET NULL，
+    #   整只持仓删时需要显式清干净，每步即时落库避免约束冲突）
     divs = session.exec(select(Dividend).where(Dividend.holding_id == h.id)).all()
     for d in divs:
         for a in session.exec(select(DividendAllocation)
