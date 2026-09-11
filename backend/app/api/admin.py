@@ -14,7 +14,7 @@ from sqlmodel import Session, func, select
 
 from ..database import get_session
 from ..models import (AdminOperationLog, Announcement, Dividend, DividendSchedule,
-                      ExchangeRate, Feedback, Holding, Lot, TaxRule, User)
+                      ExchangeRate, Feedback, Holding, Lot, Security, TaxRule, User)
 from ..schemas import (AnnouncementCreate, AnnouncementUpdate, ConfigUpdateIn,
                        FeedbackHandleIn, RateManualIn, ScheduleAdminCreate,
                        ScheduleBatchApproveIn, ScheduleRejectIn, TaxRuleUpdate)
@@ -230,10 +230,11 @@ def reset_password(user_id: int, request: Request,
 
 
 # ---------- 11.3 预案审核 ----------
-def schedule_out(session: Session, s: DividendSchedule) -> dict:
+def schedule_out(session: Session, s: DividendSchedule, sec: Security | None = None) -> dict:
     submitter = session.get(User, s.submitted_by) if s.submitted_by else None
     reviewer = session.get(User, s.reviewed_by) if s.reviewed_by else None
-    sec = security_service.get_security(session, s.market, s.code)
+    if sec is None:
+        sec = security_service.get_security(session, s.market, s.code)
     return {
         "id": s.id, "market": s.market, "code": s.code,
         "name": sec.name if sec else s.code,
@@ -264,24 +265,31 @@ def admin_list_schedules(status: str | None = None, market: str | None = None,
     rows = list(session.exec(
         stmt.order_by(DividendSchedule.created_at.desc(), DividendSchedule.id.desc())  # type: ignore
     ).all())
+    # 批量取标的信息（内部按 (market,code) 去重 + row-value IN 分批），供关键字过滤与渲染
     sec_map = security_service.security_map(session, [(s.market, s.code) for s in rows])
     if keyword:
         kw = keyword.lower()
         rows = [s for s in rows
                 if kw in s.code.lower()
-                or kw in (sec_map.get((s.market, s.code)).name if sec_map.get((s.market, s.code)) else "").lower()]
+                or kw in (sec_map[(s.market, s.code)].name
+                          if (s.market, s.code) in sec_map else "").lower()]
     if min_confidence is not None:
         rows = [s for s in rows if s.confidence >= min_confidence]
     if max_confidence is not None:
         rows = [s for s in rows if s.confidence <= max_confidence]
 
+    # 状态计数走 SQL 聚合，避免全量实例化后再数（爬虫全量补抓后可能有数千行）
     counts = {"pending": 0, "published": 0, "rejected": 0}
-    for s in session.exec(select(DividendSchedule)).all():
-        counts[s.status] = counts.get(s.status, 0) + 1
+    for st, cnt in session.exec(
+        select(DividendSchedule.status, func.count()).group_by(DividendSchedule.status)
+    ).all():
+        counts[st] = cnt
 
     total = len(rows)
     start = (page - 1) * page_size
-    return ok({"items": [schedule_out(session, s) for s in rows[start:start + page_size]],
+    page_rows = rows[start:start + page_size]
+    return ok({"items": [schedule_out(session, s, sec_map.get((s.market, s.code)))
+                         for s in page_rows],
                "total": total, "page": page, "page_size": page_size,
                "status_counts": counts})
 

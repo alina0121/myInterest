@@ -42,22 +42,29 @@ def get_security(session: Session, market: str, code: str) -> Security | None:
 
 def security_map(session: Session, keys: Iterable[tuple[str, str]]
                  ) -> dict[tuple[str, str], Security]:
-    """批量按 (market, code) 查 securities，返回 dict 便于列表渲染时 O(1) 取 name/currency。"""
+    """批量按 (market, code) 查 securities，返回 dict 便于列表渲染时 O(1) 取 name/currency。
+
+    用 row-value IN（平面表达式，SQLite 3.15+）而非 N 个 OR 子句——
+    OR 拼出的左深表达式树在 key 数 >1000 时会触发
+    'Expression tree is too large (maximum depth 1000)'（爬虫全量补抓后必现）。
+    分批查询同时规避老版本 SQLite 999 变量上限。
+    """
     keys = list(set(keys))
     if not keys:
         return {}
-    clauses = []
-    params: dict = {}
-    for i, (m, c) in enumerate(keys):
-        clauses.append(f"(market=:m{i} AND code=:c{i})")
-        params[f"m{i}"] = m
-        params[f"c{i}"] = c
-    sql = "SELECT * FROM securities WHERE " + " OR ".join(clauses)
-    rows = session.execute(text(sql), params).all()
     result: dict[tuple[str, str], Security] = {}
-    for r in rows:
-        sec = Security.model_validate(dict(r._mapping))
-        result[(sec.market, sec.code)] = sec
+    batch_size = 400
+    for start in range(0, len(keys), batch_size):
+        batch = keys[start:start + batch_size]
+        placeholders = ",".join(f"(:m{i},:c{i})" for i in range(len(batch)))
+        params: dict = {}
+        for i, (m, c) in enumerate(batch):
+            params[f"m{i}"] = m
+            params[f"c{i}"] = c
+        sql = f"SELECT * FROM securities WHERE (market, code) IN ({placeholders})"
+        for r in session.execute(text(sql), params).all():
+            sec = Security.model_validate(dict(r._mapping))
+            result[(sec.market, sec.code)] = sec
     return result
 
 

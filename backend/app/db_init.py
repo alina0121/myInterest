@@ -1,4 +1,6 @@
 """建库初始化：建表 + 种子数据（税率规则/汇率），schema 版本 PRAGMA user_version。"""
+import logging
+
 from sqlalchemy import text
 from sqlmodel import Session, select
 
@@ -6,6 +8,8 @@ from .database import engine
 from .models import ExchangeRate, TaxRule
 from .services.fx_service import fetch_latest_rate
 from .utils.timeutil import now_str
+
+log = logging.getLogger("xi.db_init")
 
 TAX_RULE_SEEDS = [
     # (market, condition, rate, hold_min_days, hold_max_days, description)
@@ -18,7 +22,31 @@ TAX_RULE_SEEDS = [
     ("bond", "债券利息", 0.00, None, None, "个人投资者暂免征收"),
 ]
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
+
+
+def _table_columns(session: Session, table: str) -> set[str]:
+    return {r[1] for r in session.execute(text(f"PRAGMA table_info({table})")).all()}
+
+
+def drop_legacy_schedule_columns(session: Session) -> None:
+    """v4：securities 分表后，旧库 dividend_schedules 遗留的 name/currency 列
+    仍是 NOT NULL，而 ORM 新插入不再提供这两列 → NOT NULL constraint failed，
+    爬虫/手工录入整批插入失败回滚（新库无这两列，函数空跑）。
+
+    必须在 migrate_securities 反填 securities 之后执行（反填 SELECT 依赖旧列）。
+    SQLite 3.35+（Python 3.9 自带版本起）支持 ALTER TABLE DROP COLUMN；
+    这两列不在任何索引/唯一约束中，可直接删。幂等：列不存在即跳过。
+    """
+    cols = _table_columns(session, "dividend_schedules")
+    dropped = []
+    for col in ("name", "currency"):
+        if col in cols:
+            session.execute(text(f"ALTER TABLE dividend_schedules DROP COLUMN {col}"))
+            dropped.append(col)
+    if dropped:
+        session.commit()
+        log.info("dropped legacy columns from dividend_schedules: %s", dropped)
 
 
 def migrate_securities(session: Session) -> None:
@@ -95,6 +123,8 @@ def init_db(seed_fx: bool = True) -> None:
         session.commit()
         create_indexes(session)
         migrate_securities(session)
+        # v4：先反填后删列，顺序不可换（反填 SELECT 依赖旧 name/currency）
+        drop_legacy_schedule_columns(session)
         # 升级库：按已有分红历史回填 securities.freq（新库为空，立即返回）
         from .services import security_service
         security_service.refresh_all_freq(session)

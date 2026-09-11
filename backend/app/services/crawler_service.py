@@ -312,6 +312,8 @@ def run_crawl(session: Session) -> dict:
         total_new += n
     except Exception as e:
         log.warning("a_share crawl failed: %s", e)
+        # 回滚失败的事务，否则同一 session 后续分支会连锁 PendingRollbackError
+        session.rollback()
         errors.append("a_share: 数据源暂时不可用")
 
     # 美股分支（需配置 XI_AV_API_KEY）
@@ -321,6 +323,7 @@ def run_crawl(session: Session) -> dict:
         total_new += n
     except Exception as e:
         log.warning("us_stock crawl failed: %s", e)
+        session.rollback()
         errors.append("us_stock: Alpha Vantage 暂时不可用或未配置 API Key")
 
     msg = "；".join(errors) if errors else None
@@ -329,6 +332,7 @@ def run_crawl(session: Session) -> dict:
         security_service.refresh_all_freq(session)
     except Exception as e:
         log.warning("refresh security freq failed: %s", e)
+        session.rollback()
     return {"fetched": total_fetched, "new_pending": total_new, "crawled_at": now_str(),
             "date": today_str(), "message": msg}
 

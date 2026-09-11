@@ -529,3 +529,18 @@ def test_holding_freq_override_and_auto_reset(client):
     lst = client.get("/api/holdings", headers=auth(token)).json()["data"]["items"]
     row = [x for x in lst if x["code"] == "TAUTO"][0]
     assert row["freq"] == "quarterly" and row["system_freq"] == "quarterly"
+
+
+def test_security_map_handles_over_1000_keys(client):
+    """回归：key 数 >1000 时旧 OR 拼接触发 'Expression tree is too large'；
+    row-value IN 分批后必须正常返回（key 不存在也必须能查，不报错）。"""
+    from app.database import engine
+    from app.services import security_service
+    from sqlmodel import Session
+
+    keys = [("a_share", f"{i:06d}") for i in range(1200)]
+    with Session(engine) as s:
+        result = security_service.security_map(s, keys)
+        assert isinstance(result, dict)
+        # 不报错即通过；返回的键必须都在请求集合内（测试库可能已有 000858 等真实代码）
+        assert set(result.keys()) <= set(keys)
