@@ -324,6 +324,11 @@ def run_crawl(session: Session) -> dict:
         errors.append("us_stock: Alpha Vantage 暂时不可用或未配置 API Key")
 
     msg = "；".join(errors) if errors else None
+    # 新预案入库后重算各标的派息频率（securities.freq 供持仓下拉默认带出）
+    try:
+        security_service.refresh_all_freq(session)
+    except Exception as e:
+        log.warning("refresh security freq failed: %s", e)
     return {"fetched": total_fetched, "new_pending": total_new, "crawled_at": now_str(),
             "date": today_str(), "message": msg}
 

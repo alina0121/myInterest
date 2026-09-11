@@ -97,6 +97,8 @@ def submit_schedule(body: ScheduleUserSubmitIn,
     session.add(sch)
     session.commit()
     session.refresh(sch)
+    # 用户补充的预案同样作为频率推断证据，重算该标的频率
+    security_service.refresh_security_freq(session, body.market, body.code)
     return ok({"id": sch.id, "status": sch.status,
                "message": "预案已提交，等待管理员审核"})
 
@@ -119,6 +121,7 @@ def list_securities(keyword: str | None = None,
         items.append({
             "market": sec.market, "code": sec.code, "name": sec.name,
             "currency": sec.currency, "latest_price": sec.latest_price,
+            "freq": sec.freq,
         })
     return ok({"items": items})
 

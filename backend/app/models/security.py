@@ -30,6 +30,6 @@ class Security(SQLModel, table=True):
     currency: str = Field(default="CNY")   # 币种
     latest_price: Optional[float] = None    # 最新价（爬虫/行情获取，不要求实时）
     price_updated_at: Optional[str] = None  # 价格更新时间
-    freq: str = Field(default="unknown")    # 派息频率（爬虫/回填）
+    freq: str = Field(default="unknown")    # 派息频率：按历年分红预案次数自动推断（security_service.refresh_*）
     created_at: str = Field(default_factory=now_str)
     updated_at: str = Field(default_factory=now_str)

@@ -95,6 +95,9 @@ def init_db(seed_fx: bool = True) -> None:
         session.commit()
         create_indexes(session)
         migrate_securities(session)
+        # 升级库：按已有分红历史回填 securities.freq（新库为空，立即返回）
+        from .services import security_service
+        security_service.refresh_all_freq(session)
         seed_tax_rules(session)
         if seed_fx:
             seed_rates_if_empty(session)

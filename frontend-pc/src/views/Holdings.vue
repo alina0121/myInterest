@@ -163,6 +163,8 @@ function onSecurityChange(key) {
     form.name = s.name
     form.currency = s.currency
     form.latest_price = s.latest_price
+    // 按分红历史推断的频率自动带出；推断不出（unknown）时保留下拉默认值，用户可手选
+    form.freq = s.freq && s.freq !== 'unknown' ? s.freq : 'unknown'
   }
 }
 

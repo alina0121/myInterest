@@ -305,6 +305,8 @@ def admin_create_schedule(body: ScheduleAdminCreate, request: Request,
          {"market": s.market, "code": s.code, "ex_date": s.ex_date, "dps": s.dps})
     session.commit()
     session.refresh(s)
+    # 新增预案可能改变年度派息次数，重算该标的频率
+    security_service.refresh_security_freq(session, body.market, body.code)
     return ok(schedule_out(session, s))
 
 

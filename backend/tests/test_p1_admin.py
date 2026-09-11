@@ -401,3 +401,95 @@ def _session():
 
 def _uid(client, token):
     return client.get("/api/auth/me", headers=auth(token)).json()["data"]["id"]
+
+
+# ---------- securities.freq 按分红历史自动推断 ----------
+
+
+def _seed_yearly_schedules(code, per_year, years=(2023, 2024), source="manual",
+                           status="pending"):
+    """每个历史年份插 per_year 条预案（月份/日期取模保证 ex_date 不重复）。"""
+    from app.database import engine
+    from app.models import DividendSchedule
+    from app.services import security_service
+    from sqlmodel import Session
+    with Session(engine) as s:
+        security_service.upsert_security(s, "a_share", code, f"测试{code}")
+        for y in years:
+            for i in range(per_year):
+                month = (i * 12 // per_year) + 1
+                day = (i % 27) + 1
+                d = f"{y}-{month:02d}-{day:02d}"
+                s.add(DividendSchedule(
+                    market="a_share", code=code, ex_date=d, pay_date=d, dps=0.1,
+                    source=source, status=status))
+        s.commit()
+
+
+def test_infer_freq_buckets(client):
+    """年度派息次数中位数落桶：1→年派，2→半年派，4→季派，12→月派。"""
+    from app.database import engine
+    from app.services import security_service
+    from sqlmodel import Session
+
+    cases = {"TANNUAL": (1, "annual"), "TSEMI": (2, "semi_annual"),
+             "TQTR": (4, "quarterly"), "TMONTH": (12, "monthly")}
+    for code, (n, _expected) in cases.items():
+        _seed_yearly_schedules(code, n)
+
+    with Session(engine) as s:
+        for code, (_n, expected) in cases.items():
+            assert security_service.infer_freq(s, "a_share", code) == expected, code
+            changed = security_service.refresh_security_freq(s, "a_share", code)
+            assert changed is True
+            sec = security_service.get_security(s, "a_share", code)
+            assert sec.freq == expected
+        # 再刷一次幂等：无变化返回 False
+        assert security_service.refresh_security_freq(s, "a_share", "TQTR") is False
+
+
+def test_infer_freq_ignores_forecast_rejected_and_partial_year(client):
+    """推算/驳回预案不作证据；只有当年（不完整）数据时按当年计数推断。"""
+    from app.database import engine
+    from app.models import DividendSchedule
+    from app.services import security_service
+    from sqlmodel import Session
+
+    # 4 条 forecast + rejected：无有效证据 → None（保持 unknown）
+    _seed_yearly_schedules("TNOEV", 4, source="forecast")
+    with Session(engine) as s:
+        # _seed 已插了 forecast；再补 4 条 rejected
+        for i in range(4):
+            d = f"2024-{(i % 12) + 1:02d}-{(i % 27) + 1:02d}"
+            s.add(DividendSchedule(market="a_share", code="TNOEV",
+                                   ex_date=d, dps=0.1, source="manual",
+                                   status="rejected"))
+        s.commit()
+        assert security_service.infer_freq(s, "a_share", "TNOEV") is None
+
+    # 只有当年数据（4 条）→ 无历史年可剔除，直接按当年计数 → 季派
+    with Session(engine) as s:
+        security_service.upsert_security(s, "a_share", "TCUR", "测试当年")
+        for i in range(4):
+            d = f"2026-{(i * 3) + 1:02d}-15"
+            s.add(DividendSchedule(market="a_share", code="TCUR",
+                                   ex_date=d, dps=0.1, source="manual",
+                                   status="published"))
+        s.commit()
+        assert security_service.infer_freq(s, "a_share", "TCUR") == "quarterly"
+
+
+def test_securities_endpoint_returns_freq(client):
+    """下拉接口带出推断出的 freq，供前端创建持仓时自动回填。"""
+    _seed_yearly_schedules("TAPIQ", 4)
+    from app.database import engine
+    from app.services import security_service
+    from sqlmodel import Session
+    with Session(engine) as s:
+        security_service.refresh_security_freq(s, "a_share", "TAPIQ")
+
+    token = register(client, "usr_freq_api")
+    r = client.get("/api/schedules/securities?keyword=TAPIQ", headers=auth(token))
+    items = r.json()["data"]["items"]
+    hit = [x for x in items if x["code"] == "TAPIQ"]
+    assert hit and hit[0]["freq"] == "quarterly"
