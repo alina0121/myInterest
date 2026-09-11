@@ -493,3 +493,39 @@ def test_securities_endpoint_returns_freq(client):
     items = r.json()["data"]["items"]
     hit = [x for x in items if x["code"] == "TAPIQ"]
     assert hit and hit[0]["freq"] == "quarterly"
+
+
+def test_holding_freq_override_and_auto_reset(client):
+    """持仓 freq 可手动覆盖；详情/列表带 system_freq；freq=auto 恢复系统推断值。"""
+    _seed_yearly_schedules("TAUTO", 4)
+    from app.database import engine
+    from app.services import security_service
+    from sqlmodel import Session
+    with Session(engine) as s:
+        security_service.refresh_security_freq(s, "a_share", "TAUTO")
+
+    token = register(client, "usr_auto_freq")
+    r = client.post("/api/holdings", headers=auth(token), json={
+        "market": "a_share", "code": "TAUTO", "name": "测试TAUTO",
+        "currency": "CNY", "freq": "annual",  # 手动覆盖系统推断的季派
+        "first_lot": {"trade_date": "2024-06-01", "shares": 100, "price": 10.0}})
+    assert r.json()["code"] == 0, r.text
+    hid = r.json()["data"]["id"]
+    assert r.json()["data"]["system_freq"] == "quarterly"
+
+    d = client.get(f"/api/holdings/{hid}", headers=auth(token)).json()["data"]
+    assert d["freq"] == "annual" and d["system_freq"] == "quarterly"
+
+    # 非法频率值被入参校验拒绝
+    assert client.patch(f"/api/holdings/{hid}", headers=auth(token),
+                        json={"freq": "bad"}).status_code == 422
+
+    # 恢复系统推断：freq 解析为季派
+    p = client.patch(f"/api/holdings/{hid}", headers=auth(token),
+                     json={"freq": "auto"}).json()["data"]
+    assert p["freq"] == "quarterly" and p["system_freq"] == "quarterly"
+
+    # 列表也带 system_freq
+    lst = client.get("/api/holdings", headers=auth(token)).json()["data"]["items"]
+    row = [x for x in lst if x["code"] == "TAUTO"][0]
+    assert row["freq"] == "quarterly" and row["system_freq"] == "quarterly"

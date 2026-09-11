@@ -10,7 +10,25 @@
               <h2>{{ h.name }}</h2>
               <span class="text-muted">{{ h.code }}</span>
               <span class="badge" :class="'badge-' + h.market?.replace('_stock', '')">{{ marketMap[h.market]?.label }}</span>
-              <span class="badge badge-freq">{{ freqMap[h.freq] || '未知' }}</span>
+              <el-popover placement="bottom-start" :width="250" trigger="click" @show="freqDraft = h.freq">
+                <template #reference>
+                  <span class="badge badge-freq" :class="{ 'badge-freq-custom': isFreqCustom }">
+                    {{ freqMap[h.freq] || '未知' }}
+                    <el-tooltip content="点击修改派息频率" placement="top">
+                      <el-icon class="freq-edit-icon"><Edit /></el-icon>
+                    </el-tooltip>
+                  </span>
+                </template>
+                <div style="font-size:13px;margin-bottom:8px;color:#475569">设置本持仓的派息频率</div>
+                <el-select v-model="freqDraft" :loading="freqSaving" style="width:100%" @change="saveFreq">
+                  <el-option v-for="f in FREQS" :key="f.value" :label="f.label" :value="f.value" />
+                  <el-option value="auto" :label="`跟随系统推断（${freqMap[h.system_freq] || '未知'}）`" />
+                </el-select>
+                <div class="text-muted" style="font-size:12px;margin-top:8px;line-height:1.7">
+                  系统按分红历史推断：<b>{{ freqMap[h.system_freq] || '未知' }}</b><br/>
+                  手动设置仅影响本持仓的推算预案
+                </div>
+              </el-popover>
             </div>
             <div class="text-muted" v-if="h.account">{{ h.account }} · {{ h.currency }}</div>
           </div>
@@ -228,12 +246,12 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Plus, Delete } from '@element-plus/icons-vue'
-import { apiHolding, apiLots, apiCreateLot, apiCreateLotsBatch, apiDeleteLot, apiDividends, apiHoldingStats } from '../api'
-import { marketMap, fmt, fmtCNY, currencyMap, freqMap } from '../utils/constants'
+import { Plus, Delete, Edit } from '@element-plus/icons-vue'
+import { apiHolding, apiUpdateHolding, apiLots, apiCreateLot, apiCreateLotsBatch, apiDeleteLot, apiDividends, apiHoldingStats } from '../api'
+import { marketMap, fmt, fmtCNY, currencyMap, freqMap, FREQS } from '../utils/constants'
 
 const route = useRoute()
 const id = route.params.id
@@ -250,6 +268,30 @@ const loading = ref(false)
 const tab = ref('lots')
 const lotDlg = ref(false)
 const saving = ref(false)
+
+// 派息频率编辑：freq 为持仓生效值，system_freq 为系统推断值，二者不一致时徽章高亮提示「手动修正」
+const freqDraft = ref('unknown')
+const freqSaving = ref(false)
+const isFreqCustom = computed(() =>
+  !!h.value.freq && !!h.value.system_freq
+  && h.value.freq !== h.value.system_freq
+  && h.value.system_freq !== 'unknown')
+
+async function saveFreq(val) {
+  freqSaving.value = true
+  try {
+    const data = await apiUpdateHolding(id, { freq: val })
+    // 选「跟随系统推断」时后端会解析成具体频率，用返回值覆盖
+    h.value.freq = data.freq
+    h.value.system_freq = data.system_freq
+    freqDraft.value = data.freq
+    ElMessage.success('派息频率已更新')
+  } catch (e) {
+    /* toast 已统一 */
+  } finally {
+    freqSaving.value = false
+  }
+}
 
 const lotForm = reactive({ direction: 'buy', trade_date: '', shares: undefined, price: undefined, fee: 0, note: '' })
 
@@ -357,7 +399,10 @@ onMounted(load)
 .head-name-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .head-name-row h2 { margin: 0; font-size: 18px; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 9999px; font-weight: 500; }
-.badge-freq { background: #f5f3ff; color: #7c3aed; }
+.badge-freq { background: #f5f3ff; color: #7c3aed; display: inline-flex; align-items: center; gap: 2px; }
+.badge-freq-custom { background: #fffbeb; color: #b45309; }
+.freq-edit-icon { font-size: 11px; cursor: pointer; opacity: 0.7; }
+.badge-freq:hover .freq-edit-icon { opacity: 1; }
 .head-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; text-align: center; }
 .hs-val { font-size: 20px; font-weight: 700; margin-top: 4px; }
 .yoc-badge {

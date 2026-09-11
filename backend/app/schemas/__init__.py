@@ -7,6 +7,9 @@ from pydantic import BaseModel, Field
 Market = Literal["a_share", "us_stock", "hk_stock", "fund", "bond"]
 Currency = Literal["CNY", "USD", "HKD"]
 Freq = Literal["monthly", "quarterly", "semi_annual", "annual", "irregular", "unknown"]
+# 持仓频率更新专用：除具体频率外允许 "auto"，表示恢复 securities 表的系统推断值
+FreqOrAuto = Literal["monthly", "quarterly", "semi_annual", "annual",
+                     "irregular", "unknown", "auto"]
 Direction = Literal["buy", "sell", "bonus_share"]
 DivStatus = Literal["pending", "confirmed"]
 
@@ -57,7 +60,7 @@ class HoldingCreate(BaseModel):
 class HoldingUpdate(BaseModel):
     name: Optional[str] = None
     account: Optional[str] = None
-    freq: Optional[Freq] = None
+    freq: Optional[FreqOrAuto] = None
     note: Optional[str] = None
     currency: Optional[Currency] = None
     current_price: Optional[float] = Field(default=None, ge=0)

@@ -19,6 +19,7 @@ export const currencyMap = Object.fromEntries(
 )
 
 export const FREQS = [
+  { value: 'unknown', label: '未知' },
   { value: 'monthly', label: '月派' },
   { value: 'quarterly', label: '季派' },
   { value: 'semi_annual', label: '半年派' },

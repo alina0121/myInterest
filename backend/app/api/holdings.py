@@ -21,10 +21,12 @@ def get_owned_holding(session: Session, user: User, holding_id: int) -> Holding:
     return h
 
 
-def holding_out(session: Session, h: Holding) -> dict:
+def holding_out(session: Session, h: Holding, system_freq: str | None = None) -> dict:
     return {
         "id": h.id, "market": h.market, "code": h.code, "name": h.name,
         "currency": h.currency, "account": h.account, "freq": h.freq,
+        # 系统按分红历史推断的频率（securities.freq），供前端展示/「恢复系统推断」
+        "system_freq": system_freq or "unknown",
         "note": h.note, "current_price": h.current_price,
         "created_at": h.created_at,
         **lots_service.computed_summary(session, h),
@@ -46,7 +48,12 @@ def list_holdings(market: str | None = None, keyword: str | None = None,
         kw = keyword.lower()
         holdings = [h for h in holdings
                     if kw in h.code.lower() or kw in h.name.lower()]
-    return ok({"items": [holding_out(session, h) for h in holdings], "total": len(holdings)})
+    sec_map = security_service.security_map(
+        session, [(h.market, h.code) for h in holdings])
+    items = [
+        holding_out(session, h, (sec.freq if (sec := sec_map.get((h.market, h.code))) else "unknown"))
+        for h in holdings]
+    return ok({"items": items, "total": len(holdings)})
 
 
 @router.post("")
@@ -77,14 +84,15 @@ def create_holding(body: HoldingCreate, session: Session = Depends(get_session),
                         fee=fl.fee, note=fl.note))
     session.commit()
     session.refresh(h)
-    return ok(holding_out(session, h))
+    return ok(holding_out(session, h, sec.freq))
 
 
 @router.get("/{holding_id}")
 def get_holding(holding_id: int, session: Session = Depends(get_session),
                 user: User = Depends(get_current_user)):
     h = get_owned_holding(session, user, holding_id)
-    return ok(holding_out(session, h))
+    sec = security_service.get_security(session, h.market, h.code)
+    return ok(holding_out(session, h, sec.freq if sec else "unknown"))
 
 
 @router.patch("/{holding_id}")
@@ -93,13 +101,18 @@ def update_holding(holding_id: int, body: HoldingUpdate,
                    user: User = Depends(get_current_user)):
     h = get_owned_holding(session, user, holding_id)
     changes = body.model_dump(exclude_unset=True)
+    # freq="auto"：放弃用户手动值，恢复 securities 表按分红历史推断的系统频率
+    if changes.get("freq") == "auto":
+        sec = security_service.get_security(session, h.market, h.code)
+        changes["freq"] = sec.freq if sec else "unknown"
     for k, v in changes.items():
         setattr(h, k, v)
     h.updated_at = now_str()
     session.add(h)
     session.commit()
     session.refresh(h)
-    return ok(holding_out(session, h))
+    sec = security_service.get_security(session, h.market, h.code)
+    return ok(holding_out(session, h, sec.freq if sec else "unknown"))
 
 
 @router.delete("/{holding_id}")
