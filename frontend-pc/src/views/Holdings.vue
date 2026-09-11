@@ -6,7 +6,7 @@
       <el-select v-model="market" placeholder="全部市场" style="width: 130px" clearable @change="load">
         <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
       </el-select>
-      <el-button type="primary" @click="addDlg = true">+ 添加持仓</el-button>
+      <el-button type="primary" @click="openAdd">+ 添加持仓</el-button>
     </div>
 
     <!-- 持仓表格 -->
@@ -62,24 +62,25 @@
     <!-- 添加持仓 -->
     <el-dialog v-model="addDlg" title="添加持仓（含首笔买入）" width="560">
       <el-form label-width="90px">
+        <el-form-item label="标的">
+          <el-select v-model="form.securityKey" filterable placeholder="输入代码或名称搜索（仅列出已有分红数据的标的）"
+            style="width: 100%" :loading="secLoading" @change="onSecurityChange">
+            <el-option v-for="s in securities" :key="s.market + s.code"
+              :label="`${s.name} (${s.code})`" :value="s.market + '|' + s.code" />
+          </el-select>
+        </el-form-item>
         <div class="form-grid">
           <el-form-item label="市场">
-            <el-select v-model="form.market" style="width: 100%">
-              <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
-            </el-select>
+            <el-input :model-value="marketMap[form.market]?.label || ''" disabled />
           </el-form-item>
           <el-form-item label="币种">
-            <el-select v-model="form.currency" style="width: 100%">
-              <el-option label="CNY 人民币" value="CNY" />
-              <el-option label="USD 美元" value="USD" />
-              <el-option label="HKD 港币" value="HKD" />
-            </el-select>
+            <el-input :model-value="form.currency" disabled />
           </el-form-item>
           <el-form-item label="代码">
-            <el-input v-model="form.code" placeholder="如 600519 / AAPL" />
+            <el-input :model-value="form.code" disabled />
           </el-form-item>
           <el-form-item label="名称">
-            <el-input v-model="form.name" placeholder="如 贵州茅台" />
+            <el-input :model-value="form.name" disabled />
           </el-form-item>
           <el-form-item label="账户">
             <el-input v-model="form.account" placeholder="选填，如 招商证券" />
@@ -89,6 +90,10 @@
               <el-option v-for="f in FREQS" :key="f.value" :label="f.label" :value="f.value" />
             </el-select>
           </el-form-item>
+        </div>
+        <div v-if="form.latest_price" class="price-tip">
+          参考最新价：<b>{{ sym(form.currency) }}{{ fmt(form.latest_price, 4) }}</b>
+          <span class="text-muted">（来自行情抓取，可能非实时）</span>
         </div>
         <el-divider>首笔买入批次（选填，可稍后在详情页添加）</el-divider>
         <div class="form-grid">
@@ -118,8 +123,8 @@
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { apiHoldings, apiCreateHolding, apiDeleteHolding } from '../api'
-import { MARKETS, marketMap, freqMap, FREQS, fmt, fmtCNY, currencyMap } from '../utils/constants'
+import { apiHoldings, apiCreateHolding, apiDeleteHolding, apiSecurities } from '../api'
+import { marketMap, freqMap, FREQS, fmt, fmtCNY, currencyMap } from '../utils/constants'
 
 const router = useRouter()
 const list = ref([])
@@ -128,13 +133,38 @@ const keyword = ref('')
 const market = ref('')
 const addDlg = ref(false)
 const saving = ref(false)
+const securities = ref([])
+const secLoading = ref(false)
 
 const form = reactive({
-  market: 'a_share', currency: 'CNY', code: '', name: '', account: '', freq: 'unknown',
+  market: '', currency: '', code: '', name: '', account: '', freq: 'unknown',
+  securityKey: '', latest_price: null,
   fl_date: '', fl_shares: undefined, fl_price: undefined, fl_fee: 0,
 })
 
 function sym(c) { return currencyMap[c]?.symbol || '' }
+
+async function loadSecurities() {
+  secLoading.value = true
+  try {
+    const data = await apiSecurities()
+    securities.value = data.items || []
+  } finally {
+    secLoading.value = false
+  }
+}
+
+function onSecurityChange(key) {
+  const [m, c] = key.split('|')
+  const s = securities.value.find(x => x.market === m && x.code === c)
+  if (s) {
+    form.market = s.market
+    form.code = s.code
+    form.name = s.name
+    form.currency = s.currency
+    form.latest_price = s.latest_price
+  }
+}
 
 async function load() {
   loading.value = true
@@ -150,7 +180,7 @@ async function load() {
 }
 
 async function save() {
-  if (!form.code || !form.name) return ElMessage.warning('请填写代码和名称')
+  if (!form.code || !form.name) return ElMessage.warning('请先从下拉中选择标的')
   const payload = {
     market: form.market, code: form.code.trim(), name: form.name.trim(),
     currency: form.currency, account: form.account || null, freq: form.freq,
@@ -174,6 +204,15 @@ async function save() {
   }
 }
 
+function openAdd() {
+  form.market = ''; form.currency = ''; form.code = ''; form.name = ''
+  form.account = ''; form.freq = 'unknown'; form.securityKey = ''
+  form.fl_date = ''; form.fl_shares = undefined; form.fl_price = undefined; form.fl_fee = 0
+  form.latest_price = null
+  addDlg.value = true
+  loadSecurities()
+}
+
 function goDetail(row) { router.push(`/holdings/${row.id}`) }
 
 async function delHolding(row) {
@@ -194,4 +233,6 @@ onMounted(load)
 .bold { font-weight: 500; }
 .empty-tip { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
+.price-tip { font-size: 13px; color: #475569; margin: -8px 0 12px 0; }
+.text-muted { color: #94a3b8; font-size: 12px; }
 </style>

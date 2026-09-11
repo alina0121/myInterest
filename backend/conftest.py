@@ -50,3 +50,13 @@ def register(client: TestClient, username: str, password: str = "password123") -
 
 def auth(token: str) -> dict:
     return {"Authorization": f"Bearer {token}"}
+
+
+def ensure_security(market: str, code: str, name: str, currency: str = "CNY") -> None:
+    """测试辅助：直接在 DB 里 upsert 一条股票基础数据，使持仓创建校验通过。"""
+    from app.database import engine
+    from app.services import security_service
+    from sqlmodel import Session
+    with Session(engine) as s:
+        security_service.upsert_security(s, market, code, name, currency)
+        s.commit()

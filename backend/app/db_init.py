@@ -5,6 +5,7 @@ from sqlmodel import Session, select
 from .database import engine
 from .models import ExchangeRate, TaxRule
 from .services.fx_service import fetch_latest_rate
+from .utils.timeutil import now_str
 
 TAX_RULE_SEEDS = [
     # (market, condition, rate, hold_min_days, hold_max_days, description)
@@ -17,7 +18,43 @@ TAX_RULE_SEEDS = [
     ("bond", "债券利息", 0.00, None, None, "个人投资者暂免征收"),
 ]
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
+
+
+def migrate_securities(session: Session) -> None:
+    """从旧 dividend_schedules 反填 securities 表，并补上 security_id 外键。
+
+    兼容两种库：
+    - 旧库：dividend_schedules 仍带 name/currency 列，用原始列反填 securities；
+    - 新库：create_all 已建 securities，无需反填。
+    """
+    # 旧库补列（SQLite 不支持 IF NOT EXISTS ADD COLUMN，靠异常吞掉重复执行）
+    try:
+        session.exec(text("ALTER TABLE dividend_schedules ADD COLUMN security_id INTEGER"))
+    except Exception:
+        pass
+    # 反填 securities：从 dividend_schedules 的旧列 name/currency 取（若存在）
+    # 新库这两列不存在，SELECT 会失败 → 跳过反填（create_all 已建空 securities）
+    try:
+        rows = session.exec(text(
+            "SELECT DISTINCT market, code, name, currency FROM dividend_schedules"
+        )).all()
+        for r in rows:
+            m, c, n, cur = r[0], r[1], r[2], r[3] or "CNY"
+            session.execute(text(
+                "INSERT OR IGNORE INTO securities (market, code, name, currency, freq, created_at, updated_at) "
+                "VALUES (:m, :c, :n, :cur, 'unknown', :ts, :ts)"
+            ), {"m": m, "c": c, "n": n or c, "cur": cur, "ts": now_str()})
+        # 回填 security_id
+        session.exec(text(
+            "UPDATE dividend_schedules SET security_id = ("
+            "  SELECT id FROM securities WHERE securities.market = dividend_schedules.market"
+            "  AND securities.code = dividend_schedules.code"
+            ")"
+        ))
+        session.commit()
+    except Exception:
+        session.rollback()
 
 
 def create_indexes(session: Session) -> None:
@@ -57,6 +94,7 @@ def init_db(seed_fx: bool = True) -> None:
         session.exec(text(f"PRAGMA user_version={SCHEMA_VERSION}"))
         session.commit()
         create_indexes(session)
+        migrate_securities(session)
         seed_tax_rules(session)
         if seed_fx:
             seed_rates_if_empty(session)

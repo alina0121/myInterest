@@ -1,5 +1,5 @@
 """API 集成测试：认证 → 持仓多批次 → 分红归属 → 税费分档 → 统计/日历 → 数据隔离。"""
-from conftest import auth, register
+from conftest import auth, ensure_security, register
 
 # ---------- 认证 ----------
 
@@ -26,6 +26,7 @@ HOLDING = {"market": "a_share", "code": "600519", "name": "贵州茅台", "curre
 
 
 def _setup_moutai(client, token):
+    ensure_security(HOLDING["market"], HOLDING["code"], HOLDING["name"], HOLDING["currency"])
     r = client.post("/api/holdings", headers=auth(token),
                     json={**HOLDING, "first_lot": {"trade_date": "2022-03-15",
                                                    "shares": 60, "price": 1580}}).json()
@@ -61,6 +62,7 @@ def test_holding_multi_batch_aggregation(client):
 
 def test_duplicate_holding_rejected(client):
     token = register(client, "carol")
+    ensure_security(HOLDING["market"], HOLDING["code"], HOLDING["name"], HOLDING["currency"])
     client.post("/api/holdings", headers=auth(token), json={**HOLDING})
     r = client.post("/api/holdings", headers=auth(token), json={**HOLDING})
     assert r.json()["code"] == 3001
@@ -108,6 +110,7 @@ def test_dividend_allocation_both_batches_and_tax(client):
 def test_tax_tier_short_holding(client):
     """持股 ≤ 1 个月 → 20% 税。"""
     token = register(client, "frank")
+    ensure_security("a_share", "000858", "五粮液")
     r = client.post("/api/holdings", headers=auth(token), json={
         "market": "a_share", "code": "000858", "name": "五粮液", "currency": "CNY",
         "first_lot": {"trade_date": "2026-01-01", "shares": 100, "price": 10}}).json()
@@ -122,6 +125,7 @@ def test_tax_tier_short_holding(client):
 
 def test_pending_confirm_with_actual_net(client):
     token = register(client, "grace")
+    ensure_security("fund", "000001", "华夏成长")
     r = client.post("/api/holdings", headers=auth(token), json={
         "market": "fund", "code": "000001", "name": "华夏成长", "currency": "CNY",
         "first_lot": {"trade_date": "2025-01-01", "shares": 1000, "price": 1.5}}).json()

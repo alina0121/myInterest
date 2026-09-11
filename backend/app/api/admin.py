@@ -19,7 +19,7 @@ from ..schemas import (AnnouncementCreate, AnnouncementUpdate, ConfigUpdateIn,
                        FeedbackHandleIn, RateManualIn, ScheduleAdminCreate,
                        ScheduleBatchApproveIn, ScheduleRejectIn, TaxRuleUpdate)
 from ..services import (config_service, crawler_service, fx_service, lots_service,
-                        schedule_service)
+                        schedule_service, security_service)
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.security import hash_password
 from ..utils.timeutil import add_days, days_ago_iso, now_str, today_str
@@ -233,10 +233,13 @@ def reset_password(user_id: int, request: Request,
 def schedule_out(session: Session, s: DividendSchedule) -> dict:
     submitter = session.get(User, s.submitted_by) if s.submitted_by else None
     reviewer = session.get(User, s.reviewed_by) if s.reviewed_by else None
+    sec = security_service.get_security(session, s.market, s.code)
     return {
-        "id": s.id, "market": s.market, "code": s.code, "name": s.name,
+        "id": s.id, "market": s.market, "code": s.code,
+        "name": sec.name if sec else s.code,
+        "currency": sec.currency if sec else "CNY",
         "ex_date": s.ex_date, "record_date": s.record_date, "pay_date": s.pay_date,
-        "dps": s.dps, "currency": s.currency, "div_type": s.div_type,
+        "dps": s.dps, "div_type": s.div_type,
         "source": s.source, "confidence": s.confidence, "status": s.status,
         "submitter_name": (submitter.nickname or submitter.username) if submitter else None,
         "reviewer_name": (reviewer.nickname or reviewer.username) if reviewer else None,
@@ -261,9 +264,12 @@ def admin_list_schedules(status: str | None = None, market: str | None = None,
     rows = list(session.exec(
         stmt.order_by(DividendSchedule.created_at.desc(), DividendSchedule.id.desc())  # type: ignore
     ).all())
+    sec_map = security_service.security_map(session, [(s.market, s.code) for s in rows])
     if keyword:
         kw = keyword.lower()
-        rows = [s for s in rows if kw in s.code.lower() or kw in s.name.lower()]
+        rows = [s for s in rows
+                if kw in s.code.lower()
+                or kw in (sec_map.get((s.market, s.code)).name if sec_map.get((s.market, s.code)) else "").lower()]
     if min_confidence is not None:
         rows = [s for s in rows if s.confidence >= min_confidence]
     if max_confidence is not None:
@@ -284,12 +290,13 @@ def admin_list_schedules(status: str | None = None, market: str | None = None,
 def admin_create_schedule(body: ScheduleAdminCreate, request: Request,
                           session: Session = Depends(get_session),
                           admin: User = Depends(get_admin_user)):
+    sec = security_service.upsert_security(session, body.market, body.code, body.name, body.currency)
     s = DividendSchedule(
-        market=body.market, code=body.code, name=body.name,
+        security_id=sec.id, market=body.market, code=body.code,
         ex_date=body.ex_date.isoformat() if body.ex_date else None,
         record_date=body.record_date.isoformat() if body.record_date else None,
         pay_date=body.pay_date.isoformat() if body.pay_date else None,
-        dps=body.dps, currency=body.currency, div_type=body.div_type,
+        dps=body.dps, div_type=body.div_type,
         source="manual", confidence=1.0, status="pending", raw_title=body.raw_title,
     )
     session.add(s)

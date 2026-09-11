@@ -18,8 +18,8 @@ from datetime import datetime
 import httpx
 from sqlmodel import Session, select
 
-from ..models import DividendSchedule
-from . import config_service
+from ..models import DividendSchedule, Security
+from . import config_service, security_service
 from ..utils.timeutil import now_str, today_str
 
 log = logging.getLogger("xi.crawler")
@@ -195,10 +195,11 @@ def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, 
                 if existing:
                     continue
             title = it["title"] or f"{it['name']} 分红送配预案"
+            sec = security_service.upsert_security(session, _MARKET, it["code"], it["name"], _CURRENCY)
             session.add(DividendSchedule(
-                market=_MARKET, code=it["code"], name=it["name"],
+                security_id=sec.id, market=_MARKET, code=it["code"],
                 ex_date=ex, record_date=rec, pay_date=pay, dps=dps,
-                currency=_CURRENCY, div_type="cash", source="crawler",
+                div_type="cash", source="crawler",
                 confidence=_confidence(ex, rec, pay), status="pending",
                 raw_title=title[:200],  # 留痕：出问题可回溯是哪条公告
             ))
@@ -277,11 +278,12 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
                     DividendSchedule.code == ticker,
                     DividendSchedule.ex_date == ex_date)).first():
                 continue
+            sec = security_service.upsert_security(session, "us_stock", ticker, ticker, _US_CURRENCY)
             session.add(DividendSchedule(
-                market="us_stock", code=ticker, name=ticker,
+                security_id=sec.id, market="us_stock", code=ticker,
                 ex_date=ex_date, record_date=ex_date, pay_date=ex_date,
                 dps=round(amount, 4),
-                currency=_US_CURRENCY, div_type="cash", source="crawler",
+                div_type="cash", source="crawler",
                 confidence=0.75,  # 月线日期不精确
                 status="pending",
                 raw_title=f"{ticker} monthly dividend ${amount}",
@@ -324,3 +326,79 @@ def run_crawl(session: Session) -> dict:
     msg = "；".join(errors) if errors else None
     return {"fetched": total_fetched, "new_pending": total_new, "crawled_at": now_str(),
             "date": today_str(), "message": msg}
+
+
+# ──────────────────────── 行情（最新价）抓取 ────────────────────────
+
+_PUSH2_URL = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+
+
+def _a_share_secid(code: str) -> str:
+    """东财行情 secid：6 开头=沪市(1)，其余=深市(0)。"""
+    return f"1.{code}" if code.startswith("6") else f"0.{code}"
+
+
+def crawl_prices(session: Session) -> int:
+    """抓取 securities 表里所有标的的最新价，更新 latest_price / price_updated_at。
+
+    - A股：东方财富 push2 批量行情接口（免费，无需 key）
+    - 美股：Alpha Vantage GLOBAL_QUOTE（复用 av_api_key，限 5 次/分钟）
+    不要求实时，每日日任务跑一次即可；网络失败静默降级。
+    返回更新条数。
+    """
+    if os.getenv("XI_CRAWL_OFFLINE", "") == "1":
+        return 0
+    updated = 0
+
+    # A 股：按 market 过滤（命中 uq_security_market_code 前导列），批量拉取，一次最多 80 只
+    a_shares = session.exec(select(Security).where(Security.market == _MARKET)).all()
+    for i in range(0, len(a_shares), 80):
+        batch = a_shares[i:i + 80]
+        secids = ",".join(_a_share_secid(s.code) for s in batch)
+        try:
+            data = _http_get_json(_PUSH2_URL, {
+                "secids": secids, "fields": "f12,f14,f2",
+            })
+            rows = (data.get("data") or {}).get("diff") or []
+            for r in rows:
+                code = str(r.get("f12") or "")
+                price = r.get("f2")
+                if not code or price in (None, "-", ""):
+                    continue
+                try:
+                    price_f = float(price)
+                except (TypeError, ValueError):
+                    continue
+                if price_f <= 0:
+                    continue
+                security_service.update_price(session, _MARKET, code, price_f)
+                updated += 1
+        except Exception as e:
+            log.warning("a_share price batch failed: %s", e)
+    if updated:
+        session.commit()
+
+    # 美股：逐只 GLOBAL_QUOTE（受限于免费层 5 次/分钟），按 market 过滤命中唯一索引前导列
+    us = session.exec(select(Security).where(Security.market == "us_stock")).all()
+    api_key = config_service.get_text("av_api_key").strip()
+    if us and api_key:
+        sleep_sec = config_service.get_int("crawl_us_rate_sleep")
+        for j, s in enumerate(us):
+            if j > 0 and sleep_sec > 0:
+                time.sleep(sleep_sec)
+            try:
+                data = _http_get_json(_AV_URL, {
+                    "function": "GLOBAL_QUOTE", "symbol": s.code, "apikey": api_key,
+                })
+                quote = data.get("Global Quote") or {}
+                price = quote.get("05. price")
+                if price:
+                    price_f = float(price)
+                    if price_f > 0:
+                        security_service.update_price(session, "us_stock", s.code, price_f)
+                        updated += 1
+            except Exception as e:
+                log.info("us price %s failed: %s", s.code, e)
+        session.commit()
+
+    return updated

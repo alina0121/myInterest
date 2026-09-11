@@ -8,6 +8,7 @@ from .exchange_rate import ExchangeRate
 from .feedback import Feedback
 from .holding import Holding
 from .lot import Lot
+from .security import Security
 from .system_config import SystemConfig
 from .tax_rule import TaxRule
 from .user import User
@@ -21,6 +22,7 @@ __all__ = [
     "Dividend",
     "DividendAllocation",
     "DividendSchedule",
+    "Security",
     "ExchangeRate",
     "TaxRule",
     "UserSetting",

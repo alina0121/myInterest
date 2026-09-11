@@ -11,7 +11,7 @@ from sqlmodel import Session, select
 
 from ..models import (Dividend, DividendSchedule, Holding, Lot, User, UserSetting)
 from ..utils.timeutil import hold_days, today_str
-from . import config_service
+from . import config_service, security_service
 from .dividend_service import (BUY_DIRS, apply_allocation, compute_eligible,
                                default_record_date, tax_rate_for)
 from .money import r2, r4
@@ -133,6 +133,10 @@ def run_daily_job() -> None:
             crawler_service.run_crawl(session)
         except Exception:  # pragma: no cover - 定时任务不允许中断
             pass
+        try:
+            crawler_service.crawl_prices(session)
+        except Exception:  # pragma: no cover
+            pass
         auto_match(session)
         generate_forecast_schedules(session)
         check_dividend_reminders(session)
@@ -177,11 +181,12 @@ def generate_forecast_schedules(session: Session) -> int:
             DividendSchedule.ex_date == next_pay)).first()
         if exists:
             continue
+        sec = security_service.upsert_security(session, h.market, h.code, h.name, h.currency)
         session.add(DividendSchedule(
-            market=h.market, code=h.code, name=h.name,
+            security_id=sec.id, market=h.market, code=h.code,
             ex_date=next_pay, pay_date=next_pay,
             dps=r4(last_div.dps),
-            currency=h.currency, div_type="cash", source="forecast",
+            div_type="cash", source="forecast",
             confidence=0.65, status="pending",
             raw_title=f"{h.name} {h.freq} 推算预案（基于历史派息节奏）"[:200],
         ))
@@ -219,6 +224,8 @@ def check_dividend_reminders(session: Session) -> int:
             if setting and (not setting.push_enabled or not setting.remind_on_payday):
                 continue
             reminded_users.add(h.user_id)
+            sec = security_service.get_security(session, sch.market, sch.code)
+            sec_name = sec.name if sec else sch.code
             log.info("dividend reminder: user=%s %s %s pay_date=%s",
-                     h.user_id, sch.code, sch.name, sch.pay_date)
+                     h.user_id, sch.code, sec_name, sch.pay_date)
     return len(reminded_users)

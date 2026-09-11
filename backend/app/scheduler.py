@@ -52,6 +52,12 @@ def run_daily_job_with_session(session) -> None:
     except Exception:
         log.exception("scheduled crawl failed")
     try:
+        n = crawler_service.crawl_prices(session)
+        if n:
+            log.info("scheduled prices: updated=%d", n)
+    except Exception:
+        log.exception("scheduled prices failed")
+    try:
         result = auto_match(session)
         log.info("scheduled auto-match: matched=%s skipped=%s",
                  result["matched"], result["skipped"])

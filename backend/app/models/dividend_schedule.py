@@ -1,4 +1,8 @@
-"""dividend_schedules 分红预案表（全局公共，后台维护，docs/02 §6）。"""
+"""dividend_schedules 分红预案表（全局公共，后台维护，docs/02 §6）。
+
+股票级属性（name/currency/freq/latest_price）已迁移到 securities 表，
+本表仅保留分红事件级字段；market/code 作为与 holdings 关联的自然键保留。
+"""
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -10,16 +14,15 @@ class DividendSchedule(SQLModel, table=True):
     __tablename__ = "dividend_schedules"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    security_id: Optional[int] = Field(default=None, foreign_key="securities.id", index=True)
     market: str                  # 市场：a_share / us_stock / hk_stock / fund / bond
-    code: str = Field(index=True)   # 证券代码
-    name: str                        # 证券名称
+    code: str = Field(index=True)   # 证券代码（与 securities.market+code 对应，保留便于关联持仓）
     ex_date: Optional[str] = None        # 除权除息日（未公告可空）
     record_date: Optional[str] = None    # 股权登记日
     pay_date: Optional[str] = None       # 派息日
     dps: Optional[float] = None          # 每股分红（预案币种，税前）
-    currency: str = Field(default="CNY")  # 预案币种
     div_type: str = Field(default="cash")             # 类型：cash / bonus_share
-    source: str = Field(default="manual")             # 来源：crawler 爬虫 / manual 后台 / user_submit 用户提交
+    source: str = Field(default="manual")             # 来源：crawler 爬虫 / manual 后台 / user_submit 用户提交 / forecast 推算
     confidence: float = 1.0                # 0~1 置信度（爬虫评分）
     status: str = Field(default="pending", index=True)  # 状态：pending 待审核 / published 已发布 / rejected 已驳回
     submitted_by: Optional[int] = Field(default=None, foreign_key="users.id")  # user_submit 时的提交用户

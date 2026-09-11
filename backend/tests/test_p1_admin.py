@@ -33,6 +33,14 @@ def _create_holding_with_lot(client, token, **kw):
             "currency": "CNY", "freq": "annual",
             "first_lot": {"trade_date": "2023-06-01", "shares": 3000, "price": 5.0}}
     body.update(kw)
+    # 持仓创建要求标的已有分红数据（securities 表），测试里直接插一条
+    from app.database import engine
+    from app.models import Security
+    from app.services import security_service
+    from sqlmodel import Session
+    with Session(engine) as s:
+        security_service.upsert_security(s, body["market"], body["code"], body["name"], body["currency"])
+        s.commit()
     r = client.post("/api/holdings", headers=auth(token), json=body)
     assert r.json()["code"] == 0, r.text
     return r.json()["data"]["id"]
@@ -148,11 +156,13 @@ def test_upcoming_returns_holdings_only(client):
     user_token = register(client, "user_up")
     _create_holding_with_lot(client, user_token)
     # 发布一条 AAPL（用户未持有）+ 一条 601398（持有）
+    # 用远期日期，避免测试因当天日期推进而被「已过期」过滤掉
+    future = "2099-06-01"
     for code, name in (("AAPL", "Apple"), ("601398", "工商银行")):
         r = client.post("/api/admin/schedules", headers=auth(admin_token), json={
             "market": "a_share" if code == "601398" else "us_stock",
             "code": code, "name": name,
-            "ex_date": "2026-09-10", "pay_date": "2026-09-10", "dps": 0.42,
+            "ex_date": future, "pay_date": future, "dps": 0.42,
             "currency": "CNY" if code == "601398" else "USD"}).json()
         client.post(f"/api/admin/schedules/{r['data']['id']}/approve", headers=auth(admin_token))
 

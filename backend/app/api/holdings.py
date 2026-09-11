@@ -3,9 +3,9 @@ from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import Dividend, DividendAllocation, Holding, Lot, User
+from ..models import Dividend, DividendAllocation, Holding, Lot, Security, User
 from ..schemas import HoldingCreate, HoldingUpdate
-from ..services import lots_service
+from ..services import lots_service, security_service
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.timeutil import now_str
 from .deps import get_current_user
@@ -57,9 +57,15 @@ def create_holding(body: HoldingCreate, session: Session = Depends(get_session),
         Holding.code == body.code)).first()
     if dup:
         raise AppError(Codes.HOLDING_EXISTS, "该标的持仓已存在，可直接添加批次", status=409)
+    # 仅允许添加「已有分红数据」的标的：securities 表只在创建预案时 upsert
+    sec = security_service.get_security(session, body.market, body.code)
+    if sec is None:
+        raise AppError(Codes.VALIDATION,
+                       "该标的暂无分红数据，暂不支持添加；请先在后台补充分红预案（爬虫或手工录入）",
+                       status=422)
     h = Holding(user_id=user.id, market=body.market, code=body.code, name=body.name,
                 currency=body.currency, account=body.account, freq=body.freq,
-                note=body.note)
+                note=body.note, current_price=sec.latest_price)
     session.add(h)
     session.flush()
     if body.first_lot:
