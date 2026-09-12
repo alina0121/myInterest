@@ -7,18 +7,6 @@ export default {
     if (!token) {
       uni.reLaunch({ url: '/pages/login/login' })
     }
-    // #ifdef H5
-    if (window.innerWidth >= 768) {
-      setTimeout(() => uni.hideTabBar({ animation: false }), 200)
-    }
-    // #endif
-  },
-  onShow() {
-    // #ifdef H5
-    if (window.innerWidth >= 768) {
-      uni.hideTabBar({ animation: false })
-    }
-    // #endif
   },
 }
 </script>
@@ -34,7 +22,7 @@ page {
 
 /* #ifdef H5 */
 @media (min-width: 768px) {
-  uni-tabbar { display: none !important; }
+  uni-tabbar, .uni-tabbar, .uni-tabbar-bottom, .custom-tab-bar { display: none !important; }
 }
 /* #endif */
 

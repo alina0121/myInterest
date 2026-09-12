@@ -14,27 +14,27 @@
     <!-- 功能菜单 -->
     <view class="card menu-card">
       <view class="menu-row" @click="go('/pages/accounts/accounts')">
-        <text class="m-icon">🏦</text>
+        <SvgIcon name="account" :size="40" />
         <text class="m-label">账户管理</text>
-        <text class="m-arrow">›</text>
+        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
       </view>
       <view class="menu-row" @click="go('/pages/rates/rates')">
-        <text class="m-icon">💱</text>
+        <SvgIcon name="rate" :size="40" />
         <text class="m-label">汇率设置</text>
-        <text class="m-arrow">›</text>
+        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
       </view>
       <view class="menu-row" @click="go('/pages/stats/stats')">
-        <text class="m-icon">📉</text>
+        <SvgIcon name="stats" :size="40" />
         <text class="m-label">统计分析</text>
-        <text class="m-arrow">›</text>
+        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
       </view>
       <view class="menu-row" @click="go('/pages/data/io')">
-        <text class="m-icon">📥</text>
+        <SvgIcon name="data" :size="40" />
         <text class="m-label">数据导入 / 导出</text>
-        <text class="m-arrow">›</text>
+        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
       </view>
       <view class="menu-row no-border" @click="toggleRemind">
-        <text class="m-icon">🔔</text>
+        <SvgIcon name="bell" :size="40" />
         <text class="m-label">分红提醒</text>
         <text :class="['m-status', settings.remind_on_payday ? 'on' : 'off']">
           {{ settings.remind_on_payday ? '已开启' : '未开启' }}
@@ -45,6 +45,7 @@
     <!-- 退出登录 -->
     <view class="logout-wrap">
       <view class="card logout-card" @click="logout">
+        <SvgIcon name="logout" :size="36" />
         <text class="logout-text">退出登录</text>
       </view>
     </view>
@@ -59,6 +60,7 @@ import { onShow } from '@dcloudio/uni-app'
 import { apiRates, apiSettings, apiSaveSettings, apiLogout } from '@/api'
 import { userStore, clearAuth } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
+import SvgIcon from '@/components/SvgIcon.vue'
 
 const user = computed(() => userStore.user)
 const rates = ref({})
@@ -132,19 +134,24 @@ function logout() {
 .menu-row {
   display: flex; align-items: center; padding: 30rpx 0;
   border-bottom: 1rpx solid #f1f5f9;
+  gap: 20rpx;
+  color: #475569;
 }
 .menu-row.no-border { border-bottom: none; }
 .menu-row:active { background: #f8fafc; }
-.m-icon { font-size: 32rpx; margin-right: 20rpx; }
 .m-label { flex: 1; font-size: 28rpx; color: #1e293b; }
-.m-arrow { color: #cbd5e1; font-size: 36rpx; }
+.m-arrow { color: #cbd5e1; flex-shrink: 0; }
 .m-status { font-size: 24rpx; }
 .m-status.on { color: #059669; }
 .m-status.off { color: #94a3b8; }
 
 /* 退出登录 */
 .logout-wrap { margin-top: 32rpx; padding: 0 8rpx; }
-.logout-card { padding: 30rpx 0; text-align: center; }
+.logout-card {
+  padding: 30rpx 0; text-align: center;
+  display: flex; align-items: center; justify-content: center; gap: 12rpx;
+  color: #dc2626;
+}
 .logout-card:active { background: #f8fafc; }
 .logout-text { font-size: 28rpx; color: #dc2626; font-weight: 500; }
 

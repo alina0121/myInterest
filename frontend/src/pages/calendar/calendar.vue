@@ -102,7 +102,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiCalendar } from '@/api'
 import { currencyMap } from '@/utils/constants'
 import WebLayout from '@/components/WebLayout.vue'
@@ -157,6 +157,9 @@ const timelineList = computed(() => {
 async function load() {
   selectedDay.value = null
   data.value = await apiCalendar(year.value, month.value)
+  // #ifdef MP-WEIXIN || MP-ALIPAY
+  uni.stopPullDownRefresh()
+  // #endif
 }
 
 function selectDay(d) { selectedDay.value = selectedDay.value === d ? null : d }
@@ -170,6 +173,7 @@ function next() {
 }
 
 onShow(load)
+onPullDownRefresh(load)
 </script>
 
 <style scoped>

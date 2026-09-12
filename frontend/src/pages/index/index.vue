@@ -87,7 +87,7 @@
 
 <script setup>
 import { computed, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend } from '@/api'
 // #ifdef H5
 import WebLayout from '@/components/WebLayout.vue'
@@ -160,9 +160,15 @@ async function load() {
     selectedMetrics.value = fm.selected
     trend.value = t
   } catch (e) { /* toast 已统一处理 */ }
+  finally {
+    // #ifdef MP-WEIXIN || MP-ALIPAY
+    uni.stopPullDownRefresh()
+    // #endif
+  }
 }
 
 onShow(load)
+onPullDownRefresh(load)
 </script>
 
 <style scoped>

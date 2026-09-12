@@ -74,7 +74,7 @@
 
 <script setup>
 import { ref } from 'vue'
-import { onShow, onReachBottom } from '@dcloudio/uni-app'
+import { onShow, onReachBottom, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiDividends } from '@/api'
 import { MARKETS, marketMap, currencyMap, badgeClass } from '@/utils/constants'
 import WebLayout from '@/components/WebLayout.vue'
@@ -134,6 +134,9 @@ async function loadSummary() {
 
 async function refresh() {
   await Promise.all([load(true), loadSummary()])
+  // #ifdef MP-WEIXIN || MP-ALIPAY
+  uni.stopPullDownRefresh()
+  // #endif
 }
 
 function setStatus(s) { status.value = s; refresh() }
@@ -152,6 +155,7 @@ async function loadMore() {
 
 onShow(refresh)
 onReachBottom(loadMore)
+onPullDownRefresh(refresh)
 </script>
 
 <style scoped>

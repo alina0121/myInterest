@@ -14,7 +14,7 @@
         <view v-for="item in menus" :key="item.path"
               :class="['nav-item', current === item.path ? 'active' : '']"
               @click="go(item.path)">
-          <text class="nav-icon">{{ item.icon }}</text>
+          <SvgIcon :name="item.icon" :size="16" :stroke="2" />
           <text>{{ item.label }}</text>
         </view>
       </nav>
@@ -34,6 +34,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { userStore } from '@/store/user'
+import SvgIcon from './SvgIcon.vue'
 
 defineProps({
   title: { type: String, default: '' },
@@ -43,12 +44,12 @@ defineProps({
 const showDesktop = ref(false)
 const current = ref('')
 const menus = [
-  { path: '/pages/index/index', label: '总览看板', icon: '📊' },
-  { path: '/pages/holdings/holdings', label: '持仓管理', icon: '📈' },
-  { path: '/pages/dividends/list', label: '分红记录', icon: '💰' },
-  { path: '/pages/calendar/calendar', label: '分红日历', icon: '📅' },
-  { path: '/pages/stats/stats', label: '统计分析', icon: '📉' },
-  { path: '/pages/mine/mine', label: '我的', icon: '⚙️' },
+  { path: '/pages/index/index', label: '总览看板', icon: 'home' },
+  { path: '/pages/holdings/holdings', label: '持仓管理', icon: 'holdings' },
+  { path: '/pages/dividends/list', label: '分红记录', icon: 'record' },
+  { path: '/pages/calendar/calendar', label: '分红日历', icon: 'calendar' },
+  { path: '/pages/stats/stats', label: '统计分析', icon: 'stats' },
+  { path: '/pages/mine/mine', label: '我的', icon: 'mine' },
 ]
 
 const user = computed(() => userStore.user || {})
@@ -58,11 +59,7 @@ const avatarText = computed(() => (nickname.value || 'U').charAt(0).toUpperCase(
 function checkWidth() {
   // #ifdef H5
   showDesktop.value = window.innerWidth >= 768
-  if (showDesktop.value) {
-    uni.hideTabBar({ animation: false })
-  } else {
-    uni.showTabBar({ animation: false })
-  }
+  // 自定义 TabBar 通过 CSS 控制显示/隐藏，无需 API 调用
   // #endif
 }
 
@@ -120,7 +117,6 @@ onShow(() => {
 }
 .nav-item:hover { background: #f1f5f9; color: #1e3a8a; }
 .nav-item.active { background: #1e3a8a; color: #fff; }
-.nav-icon { font-size: 16px; }
 .topbar-right { display: flex; align-items: center; gap: 16px; }
 .user-box { display: flex; align-items: center; gap: 10px; cursor: pointer; }
 .avatar {
