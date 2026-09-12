@@ -10,8 +10,10 @@ P1 数据源：
 - 入库 pending；同 (market, code, ex_date) 已存在（任意状态）则跳过
 - 网络失败/离线模式（XI_CRAWL_OFFLINE=1）静默降级，不抛异常
 """
+import json
 import logging
 import os
+import re
 import time
 from datetime import datetime
 
@@ -233,7 +235,16 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
         return 0, 0
 
     fetched, new_pending = 0, 0
-    tickers = config_service.get_list("crawl_us_tickers")  # 后台可配的白名单
+    # 白名单优先从 securities 表读（crawl_enabled=True）；
+    # 表为空时用配置项兜底，并自动建 securities 记录标记为白名单
+    tickers = security_service.get_crawl_enabled_codes(session, "us_stock")
+    if not tickers:
+        tickers = config_service.get_list("crawl_us_tickers")
+        for t in tickers:
+            security_service.upsert_security(session, "us_stock", t, t, "USD", crawl_enabled=True)
+            security_service.set_crawl_enabled(session, "us_stock", t, True)
+        session.commit()
+        log.info("us_stock whitelist seeded from config: %s", tickers)
     sleep_sec = config_service.get_int("crawl_us_rate_sleep")
 
     # 串行拉白名单：Alpha Vantage 免费层限 5 次/分钟、25 次/天
@@ -294,37 +305,253 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
     return fetched, new_pending
 
 
-def run_crawl(session: Session) -> dict:
+# ──────────────────────── 港股分红 ────────────────────────
+
+_HK_F10_URL = "https://datacenter.eastmoney.com/securities/api/data/v1/get"
+_HK_REPORT = "RPT_HKF10_MAIN_DIVBASIC"
+_HK_CURRENCY = "HKD"
+
+# 从「每股派港币5.3元」中提取金额；兼容美元/人民币表述
+_HK_AMOUNT_RE = re.compile(r"派([^0-9]*)([\d.]+)")
+
+
+def _hk_normalize_date(v: str | None) -> str | None:
+    """东财港股日期格式 '2026/05/15' → '2026-05-15'。"""
+    if not v:
+        return None
+    s = str(v).strip().replace("/", "-")[:10]
+    try:
+        datetime.strptime(s, "%Y-%m-%d")
+        return s
+    except ValueError:
+        return None
+
+
+def _hk_parse_amount(plan_explain: str) -> tuple[float | None, str]:
+    """从分红方案文本解析每股金额与币种。
+
+    样例：「每股派港币5.3元」「每股派美元0.244元(相当于港币1.898元)」「每股派人民币0.5元」
+    规则：取「派」字后的第一个数字；币种按文本关键词推断，默认 HKD。
+    """
+    if not plan_explain:
+        return None, _HK_CURRENCY
+    m = _HK_AMOUNT_RE.search(plan_explain)
+    if not m:
+        return None, _HK_CURRENCY
+    try:
+        amount = float(m.group(2))
+    except ValueError:
+        return None, _HK_CURRENCY
+    text = plan_explain
+    if "美元" in text or "USD" in text.upper():
+        currency = "USD"
+    elif "人民币" in text or "CNY" in text.upper():
+        currency = "CNY"
+    else:
+        currency = _HK_CURRENCY
+    return amount, currency
+
+
+def crawl_hk_stock(session: Session) -> tuple[int, int]:
+    """抓取港股分红预案（东方财富港股 F10 分红送配）。
+
+    数据源：datacenter.eastmoney.com reportName=RPT_HKF10_MAIN_DIVBASIC
+    按白名单 (crawl_hk_tickers) 逐只拉取；每股金额从 PLAN_EXPLAIN 文本解析。
+    返回 (fetched, new_pending)。
+    """
+    fetched, new_pending = 0, 0
+    # 白名单优先从 securities 表读（crawl_enabled=True）；
+    # 表为空时用配置项兜底，并自动建 securities 记录标记为白名单
+    tickers = security_service.get_crawl_enabled_codes(session, "hk_stock")
+    if not tickers:
+        tickers = config_service.get_list("crawl_hk_tickers")
+        for t in tickers:
+            security_service.upsert_security(session, "hk_stock", t, t, "HKD", crawl_enabled=True)
+            security_service.set_crawl_enabled(session, "hk_stock", t, True)
+        session.commit()
+        log.info("hk_stock whitelist seeded from config: %s", tickers)
+    sleep_sec = config_service.get_int("crawl_hk_rate_sleep")
+    if not tickers:
+        log.info("hk_stock crawl skipped: no crawl_enabled securities and config whitelist empty")
+        return 0, 0
+
+    for i, code in enumerate(tickers):
+        if i > 0 and sleep_sec > 0:
+            time.sleep(sleep_sec)
+        try:
+            data = _http_get_json(_HK_F10_URL, {
+                "reportName": _HK_REPORT, "columns": "ALL",
+                "filter": f'(SECURITY_CODE="{code}")(IS_BFP="0")',
+                "pageNumber": 1, "pageSize": 50,
+                "sortTypes": "-1,-1", "sortColumns": "NOTICE_DATE,EX_DIVIDEND_DATE",
+                "source": "F10", "client": "PC",
+            })
+        except Exception as e:
+            log.info("hk %s fetch failed: %s", code, e)
+            continue
+
+        rows = (data.get("result") or {}).get("data") or []
+        # 取该股票名称（优先用 securities 表已有名称，否则用代码）
+        sec_name = code
+        existing_sec = security_service.get_security(session, "hk_stock", code)
+        if existing_sec and existing_sec.name:
+            sec_name = existing_sec.name
+
+        for row in rows:
+            ex = _hk_normalize_date(row.get("EX_DIVIDEND_DATE"))
+            if not ex:
+                continue  # 无除权日的记录无法去重，跳过
+            pay = _hk_normalize_date(row.get("DIVIDEND_DATE"))
+            # TRANSFER_END_DATE 形如 '2026/05/19-2026/05/20'，取首日作为登记日近似
+            rec_raw = str(row.get("TRANSFER_END_DATE") or "")
+            rec = _hk_normalize_date(rec_raw.split("-")[0] if "-" in rec_raw else rec_raw) or ex
+            amount, currency = _hk_parse_amount(row.get("PLAN_EXPLAIN") or "")
+            if amount is None or amount <= 0:
+                continue
+            fetched += 1
+            # 去重：同 (市场,代码,除权日) 任意状态已存在则跳过
+            if session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == "hk_stock",
+                    DividendSchedule.code == code,
+                    DividendSchedule.ex_date == ex)).first():
+                continue
+            sec = security_service.upsert_security(session, "hk_stock", code, sec_name, currency)
+            session.add(DividendSchedule(
+                security_id=sec.id, market="hk_stock", code=code,
+                ex_date=ex, record_date=rec, pay_date=pay,
+                dps=round(amount, 4), div_type="cash", source="crawler",
+                confidence=0.85,  # 官方公告但需人工核对金额解析
+                status="pending",
+                raw_title=str(row.get("PLAN_EXPLAIN") or f"{code} dividend")[:200],
+            ))
+            new_pending += 1
+
+    session.commit()
+    return fetched, new_pending
+
+
+# ──────────────────────── 基金分红 ────────────────────────
+
+_FUND_URL = "https://fund.eastmoney.com/Data/funddataIndex_Interface.aspx"
+_FUND_CURRENCY = "CNY"
+
+
+def crawl_fund(session: Session) -> tuple[int, int]:
+    """抓取基金分红预案（天天基金分红列表）。
+
+    数据源：fund.eastmoney.com/Data/funddataIndex_Interface.aspx?dt=8
+    按登记日倒序分页增量抓取；返回 (fetched, new_pending)。
+    响应为 JS 文本：var pageinfo=[total,pageSize,page]; var jjfh_data=[[code,name,rec,ex,dps,pay,type],...]
+    """
+    fetched, new_pending = 0, 0
+    page_size = config_service.get_int("crawl_fund_page_size")
+    max_pages = config_service.get_int("crawl_fund_max_pages")
+    page_size = max(10, min(200, int(page_size)))
+
+    for page in range(1, max_pages + 1):
+        try:
+            resp = httpx.get(_FUND_URL, params={
+                "dt": 8, "page": page, "rank": "DJR", "sort": "desc",
+                "gs": "", "ftype": "", "year": "",
+            }, timeout=15.0, headers={"User-Agent": "Mozilla/5.0 (xi-dividend-tracker)"})
+            resp.raise_for_status()
+            text = resp.text
+        except Exception as e:
+            log.info("fund page %s fetch failed: %s", page, e)
+            break
+
+        # 解析 var jjfh_data=[[...],[...]]
+        m = re.search(r"var\s+jjfh_data\s*=\s*(\[.*?\]);", text, re.DOTALL)
+        if not m:
+            break
+        try:
+            rows = json.loads(m.group(1))
+        except (json.JSONDecodeError, ValueError):
+            break
+        if not isinstance(rows, list) or not rows:
+            break
+
+        page_inserts = 0
+        for row in rows:
+            if not isinstance(row, list) or len(row) < 6:
+                continue
+            code, name = str(row[0] or ""), str(row[1] or "")
+            rec, ex, dps_str, pay = row[2], row[3], row[4], row[5]
+            if not code or not name:
+                continue
+            try:
+                dps = float(dps_str) if dps_str not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                dps = 0.0
+            if dps <= 0 or not ex:
+                continue
+            fetched += 1
+            # 去重：同 (市场,代码,除权日)
+            if session.exec(select(DividendSchedule).where(
+                    DividendSchedule.market == "fund",
+                    DividendSchedule.code == code,
+                    DividendSchedule.ex_date == ex)).first():
+                continue
+            sec = security_service.upsert_security(session, "fund", code, name, _FUND_CURRENCY)
+            session.add(DividendSchedule(
+                security_id=sec.id, market="fund", code=code,
+                ex_date=ex, record_date=rec or ex, pay_date=pay,
+                dps=round(dps, 4), div_type="cash", source="crawler",
+                confidence=0.90,  # 天天基金官方列表，字段完整
+                status="pending",
+                raw_title=f"{name} 分红"[:200],
+            ))
+            page_inserts += 1
+            new_pending += 1
+
+        session.commit()  # 每页提交一次
+        # 增量停止：本页无新增 → 后续更老的页必然已入库
+        if page_inserts == 0:
+            break
+        # 末页不足一页 → 没有更多数据
+        if len(rows) < page_size:
+            break
+
+    return fetched, new_pending
+
+
+# ──────────────────────── 统一调度 ────────────────────────
+
+def run_crawl(session: Session, market: str | None = None) -> dict:
     """立即触发采集（docs/04 §11.3 /crawl）。离线或失败返回 0 并附 message。
 
-    顺序执行 A 股 + 美股两个分支；任一分支异常不中断另一分支。
+    market 参数：
+      - None / 'all'：顺序执行所有市场分支
+      - 'a_share' / 'us_stock' / 'hk_stock' / 'fund'：仅爬指定市场
+    任一分支异常不中断其他分支。
     """
     if os.getenv("XI_CRAWL_OFFLINE", "") == "1":
         return {"fetched": 0, "new_pending": 0, "message": "爬虫离线模式（XI_CRAWL_OFFLINE=1）"}
 
+    targets = [market] if market and market != "all" else ["a_share", "us_stock", "hk_stock", "fund"]
     total_fetched, total_new = 0, 0
     errors = []
+    # 各市场对应的爬取函数与失败提示
+    dispatch = {
+        "a_share": (crawl_a_share, "a_share: 数据源暂时不可用"),
+        "us_stock": (crawl_us_stock, "us_stock: Alpha Vantage 暂时不可用或未配置 API Key"),
+        "hk_stock": (crawl_hk_stock, "hk_stock: 东方财富 F10 暂时不可用"),
+        "fund": (crawl_fund, "fund: 天天基金分红接口暂时不可用"),
+    }
 
-    # A 股分支
-    try:
-        f, n = crawl_a_share(session)
-        total_fetched += f
-        total_new += n
-    except Exception as e:
-        log.warning("a_share crawl failed: %s", e)
-        # 回滚失败的事务，否则同一 session 后续分支会连锁 PendingRollbackError
-        session.rollback()
-        errors.append("a_share: 数据源暂时不可用")
-
-    # 美股分支（需配置 XI_AV_API_KEY）
-    try:
-        f, n = crawl_us_stock(session)
-        total_fetched += f
-        total_new += n
-    except Exception as e:
-        log.warning("us_stock crawl failed: %s", e)
-        session.rollback()
-        errors.append("us_stock: Alpha Vantage 暂时不可用或未配置 API Key")
+    for m in targets:
+        fn, err_msg = dispatch.get(m, (None, None))
+        if fn is None:
+            errors.append(f"{m}: 未知市场")
+            continue
+        try:
+            f, n = fn(session)
+            total_fetched += f
+            total_new += n
+        except Exception as e:
+            log.warning("%s crawl failed: %s", m, e)
+            session.rollback()
+            errors.append(err_msg)
 
     msg = "；".join(errors) if errors else None
     # 新预案入库后重算各标的派息频率（securities.freq 供持仓下拉默认带出）
@@ -339,18 +566,24 @@ def run_crawl(session: Session) -> dict:
 
 # ──────────────────────── 行情（最新价）抓取 ────────────────────────
 
-_PUSH2_URL = "https://push2.eastmoney.com/api/qt/ulist.np/get"
+_TENCENT_QT_URL = "http://qt.gtimg.cn/q="
 
 
-def _a_share_secid(code: str) -> str:
-    """东财行情 secid：6 开头=沪市(1)，其余=深市(0)。"""
-    return f"1.{code}" if code.startswith("6") else f"0.{code}"
+def _tencent_symbol(market: str, code: str) -> str:
+    """腾讯行情代码前缀。
+
+    - 港股：hk + code
+    - A股/基金：6/5 开头=沪市(sh)，其余=深市(sz)
+    """
+    if market == "hk_stock":
+        return f"hk{code}"
+    return f"sh{code}" if code[0] in ("6", "5") else f"sz{code}"
 
 
 def crawl_prices(session: Session) -> int:
     """抓取 securities 表里所有标的的最新价，更新 latest_price / price_updated_at。
 
-    - A股：东方财富 push2 批量行情接口（免费，无需 key）
+    - A股/港股/基金：腾讯行情批量接口（免费，无需 key，价格单位直接是元）
     - 美股：Alpha Vantage GLOBAL_QUOTE（复用 av_api_key，限 5 次/分钟）
     不要求实时，每日日任务跑一次即可；网络失败静默降级。
     返回更新条数。
@@ -359,33 +592,39 @@ def crawl_prices(session: Session) -> int:
         return 0
     updated = 0
 
-    # A 股：按 market 过滤（命中 uq_security_market_code 前导列），批量拉取，一次最多 80 只
-    a_shares = session.exec(select(Security).where(Security.market == _MARKET)).all()
-    for i in range(0, len(a_shares), 80):
-        batch = a_shares[i:i + 80]
-        secids = ",".join(_a_share_secid(s.code) for s in batch)
-        try:
-            data = _http_get_json(_PUSH2_URL, {
-                "secids": secids, "fields": "f12,f14,f2",
-            })
-            rows = (data.get("data") or {}).get("diff") or []
-            for r in rows:
-                code = str(r.get("f12") or "")
-                price = r.get("f2")
-                if not code or price in (None, "-", ""):
-                    continue
-                try:
-                    price_f = float(price)
-                except (TypeError, ValueError):
-                    continue
-                if price_f <= 0:
-                    continue
-                security_service.update_price(session, _MARKET, code, price_f)
-                updated += 1
-        except Exception as e:
-            log.warning("a_share price batch failed: %s", e)
-    if updated:
-        session.commit()
+    # A股 / 港股 / 基金：统一走腾讯行情批量接口，一次最多 50 只
+    cn_markets = ("a_share", "hk_stock", "fund")
+    for market in cn_markets:
+        secs = session.exec(select(Security).where(Security.market == market)).all()
+        if not secs:
+            continue
+        for i in range(0, len(secs), 50):
+            batch = secs[i:i + 50]
+            symbols = ",".join(_tencent_symbol(market, s.code) for s in batch)
+            try:
+                resp = httpx.get(_TENCENT_QT_URL + symbols, timeout=10,
+                                 headers={"User-Agent": "Mozilla/5.0 (xi-dividend-tracker)"})
+                resp.raise_for_status()
+                for line in resp.text.strip().split("\n"):
+                    if "=" not in line:
+                        continue
+                    _, val = line.split("=", 1)
+                    parts = val.strip('";').split("~")
+                    if len(parts) < 4:
+                        continue
+                    code = parts[2]
+                    try:
+                        price_f = float(parts[3])
+                    except (TypeError, ValueError):
+                        continue
+                    if price_f <= 0:
+                        continue
+                    security_service.update_price(session, market, code, price_f)
+                    updated += 1
+            except Exception as e:
+                log.warning("%s price batch failed: %s", market, e)
+        if updated:
+            session.commit()
 
     # 美股：逐只 GLOBAL_QUOTE（受限于免费层 5 次/分钟），按 market 过滤命中唯一索引前导列
     us = session.exec(select(Security).where(Security.market == "us_stock")).all()

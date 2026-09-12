@@ -16,18 +16,22 @@ from ..utils.timeutil import now_str, today_str
 
 
 def upsert_security(session: Session, market: str, code: str, name: str,
-                    currency: str = "CNY") -> Security:
+                    currency: str = "CNY", crawl_enabled: bool | None = None) -> Security:
     """幂等写入股票基础信息：同 (market, code) 已存在则更新 name/currency，
     不存在则插入。返回对应 Security（id 不变）。
 
+    crawl_enabled：仅在新增时设置（None=用默认 False）；已存在记录不覆盖该字段，
+    避免爬虫 upsert 时把管理员手动设的白名单标记冲掉。
+
     使用 SQLite INSERT ... ON CONFLICT 原子语义，避免先查再插的竞态。
     """
+    ce = 1 if crawl_enabled else 0
     session.execute(text(
-        "INSERT INTO securities (market, code, name, currency, freq, created_at, updated_at) "
-        "VALUES (:m, :c, :n, :cur, 'unknown', :ts, :ts) "
+        "INSERT INTO securities (market, code, name, currency, freq, crawl_enabled, created_at, updated_at) "
+        "VALUES (:m, :c, :n, :cur, 'unknown', :ce, :ts, :ts) "
         "ON CONFLICT(market, code) DO UPDATE SET "
         "name=excluded.name, currency=excluded.currency, updated_at=excluded.updated_at"
-    ), {"m": market, "c": code, "n": name, "cur": currency, "ts": now_str()})
+    ), {"m": market, "c": code, "n": name, "cur": currency, "ce": ce, "ts": now_str()})
     session.flush()
     sec = session.exec(select(Security).where(
         Security.market == market, Security.code == code)).first()
@@ -38,6 +42,27 @@ def upsert_security(session: Session, market: str, code: str, name: str,
 def get_security(session: Session, market: str, code: str) -> Security | None:
     return session.exec(select(Security).where(
         Security.market == market, Security.code == code)).first()
+
+
+def get_crawl_enabled_codes(session: Session, market: str) -> list[str]:
+    """取某市场中 crawl_enabled=True 的证券代码列表（爬虫白名单）。"""
+    rows = session.exec(select(Security.code).where(
+        Security.market == market, Security.crawl_enabled == True)).all()  # noqa: E712
+    return list(rows)
+
+
+def set_crawl_enabled(session: Session, market: str, code: str, enabled: bool) -> bool:
+    """设置某证券的 crawl_enabled 标记，返回是否实际更新。"""
+    sec = get_security(session, market, code)
+    if sec is None:
+        return False
+    if sec.crawl_enabled == enabled:
+        return False
+    sec.crawl_enabled = enabled
+    sec.updated_at = now_str()
+    session.add(sec)
+    session.commit()
+    return True
 
 
 def security_map(session: Session, keys: Iterable[tuple[str, str]]

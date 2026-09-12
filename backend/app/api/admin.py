@@ -9,7 +9,7 @@ import json
 import secrets
 import string
 
-from fastapi import APIRouter, BackgroundTasks, Depends, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlmodel import Session, func, select
 
 from ..database import get_session
@@ -17,7 +17,8 @@ from ..models import (AdminOperationLog, Announcement, Dividend, DividendSchedul
                       ExchangeRate, Feedback, Holding, Lot, Security, TaxRule, User)
 from ..schemas import (AnnouncementCreate, AnnouncementUpdate, ConfigUpdateIn,
                        FeedbackHandleIn, RateManualIn, ScheduleAdminCreate,
-                       ScheduleBatchApproveIn, ScheduleRejectIn, TaxRuleUpdate)
+                       ScheduleBatchApproveIn, ScheduleRejectIn, SecurityCreateIn,
+                       TaxRuleUpdate)
 from ..services import (config_service, crawler_service, fx_service, lots_service,
                         schedule_service, security_service)
 from ..utils.errors import AppError, Codes, not_found, ok
@@ -257,26 +258,33 @@ def admin_list_schedules(status: str | None = None, market: str | None = None,
                          page: int = 1, page_size: int = 20,
                          session: Session = Depends(get_session),
                          admin: User = Depends(get_admin_user)):
+    from sqlalchemy import or_
     stmt = select(DividendSchedule)
     if status:
         stmt = stmt.where(DividendSchedule.status == status)
     if market:
         stmt = stmt.where(DividendSchedule.market == market)
-    rows = list(session.exec(
-        stmt.order_by(DividendSchedule.created_at.desc(), DividendSchedule.id.desc())  # type: ignore
-    ).all())
-    # 批量取标的信息（内部按 (market,code) 去重 + row-value IN 分批），供关键字过滤与渲染
-    sec_map = security_service.security_map(session, [(s.market, s.code) for s in rows])
-    if keyword:
-        kw = keyword.lower()
-        rows = [s for s in rows
-                if kw in s.code.lower()
-                or kw in (sec_map[(s.market, s.code)].name
-                          if (s.market, s.code) in sec_map else "").lower()]
     if min_confidence is not None:
-        rows = [s for s in rows if s.confidence >= min_confidence]
+        stmt = stmt.where(DividendSchedule.confidence >= min_confidence)
     if max_confidence is not None:
-        rows = [s for s in rows if s.confidence <= max_confidence]
+        stmt = stmt.where(DividendSchedule.confidence <= max_confidence)
+    # 关键字：代码直接匹配，名称需 JOIN securities
+    if keyword:
+        kw = f"%{keyword}%"
+        stmt = stmt.outerjoin(Security, Security.id == DividendSchedule.security_id)
+        stmt = stmt.where(or_(DividendSchedule.code.like(kw), Security.name.like(kw)))
+
+    # 总数（与过滤条件一致）
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = session.exec(count_stmt).one()
+
+    # 分页：LIMIT/OFFSET，只取当前页
+    stmt = stmt.order_by(DividendSchedule.created_at.desc(), DividendSchedule.id.desc())
+    stmt = stmt.offset((page - 1) * page_size).limit(page_size)
+    page_rows = session.exec(stmt).all()
+
+    # 只批量取当前页标的信息供渲染
+    sec_map = security_service.security_map(session, [(s.market, s.code) for s in page_rows])
 
     # 状态计数走 SQL 聚合，避免全量实例化后再数（爬虫全量补抓后可能有数千行）
     counts = {"pending": 0, "published": 0, "rejected": 0}
@@ -285,13 +293,20 @@ def admin_list_schedules(status: str | None = None, market: str | None = None,
     ).all():
         counts[st] = cnt
 
-    total = len(rows)
-    start = (page - 1) * page_size
-    page_rows = rows[start:start + page_size]
+    # 按市场分组的各状态计数：前端预案审核页按 A股/美股/港股/基金 分 tab，
+    # 让管理员一眼看到「哪个市场 pending=0 → 爬虫没覆盖到」便于针对性排查
+    market_counts: dict[str, dict[str, int]] = {}
+    for m, st, cnt in session.exec(
+        select(DividendSchedule.market, DividendSchedule.status, func.count())
+        .group_by(DividendSchedule.market, DividendSchedule.status)
+    ).all():
+        market_counts.setdefault(m, {"pending": 0, "published": 0, "rejected": 0})
+        market_counts[m][st] = cnt
+
     return ok({"items": [schedule_out(session, s, sec_map.get((s.market, s.code)))
                          for s in page_rows],
                "total": total, "page": page, "page_size": page_size,
-               "status_counts": counts})
+               "status_counts": counts, "market_counts": market_counts})
 
 
 @router.post("/schedules")
@@ -428,11 +443,81 @@ def reject_schedule(sid: int, body: ScheduleRejectIn, request: Request,
 
 @router.post("/schedules/crawl")
 def crawl_schedules(request: Request, session: Session = Depends(get_session),
-                    admin: User = Depends(get_admin_user)):
-    result = crawler_service.run_crawl(session)
-    _log(session, admin, request, "schedule.crawl", "schedule", None, result)
+                    admin: User = Depends(get_admin_user),
+                    market: str | None = Query(None, description="a_share/us_stock/hk_stock/fund/all，缺省=全市场")):
+    result = crawler_service.run_crawl(session, market=market)
+    _log(session, admin, request, "schedule.crawl", "schedule", None,
+         {"market": market, "result": result})
     session.commit()
     return ok(result)
+
+
+# ---------- 证券管理（爬虫白名单） ----------
+@router.get("/securities")
+def admin_list_securities(market: str | None = None,
+                          crawl_enabled: bool | None = None,
+                          keyword: str | None = None,
+                          page: int = 1, page_size: int = 50,
+                          session: Session = Depends(get_session),
+                          admin: User = Depends(get_admin_user)):
+    """证券列表（管理爬虫白名单用）。支持按市场、是否白名单、代码/名称关键字过滤。"""
+    stmt = select(Security)
+    if market:
+        stmt = stmt.where(Security.market == market)
+    if crawl_enabled is not None:
+        stmt = stmt.where(Security.crawl_enabled == crawl_enabled)
+    if keyword:
+        kw = f"%{keyword}%"
+        stmt = stmt.where((Security.code.like(kw)) | (Security.name.like(kw)))
+    # 总数
+    count_stmt = select(func.count()).select_from(stmt.subquery())
+    total = session.exec(count_stmt).one()
+    # 分页
+    stmt = stmt.order_by(Security.market, Security.code).offset((page - 1) * page_size).limit(page_size)
+    rows = session.exec(stmt).all()
+    items = [{
+        "id": s.id, "market": s.market, "code": s.code, "name": s.name,
+        "currency": s.currency, "freq": s.freq,
+        "crawl_enabled": bool(s.crawl_enabled),
+        "latest_price": s.latest_price, "price_updated_at": s.price_updated_at,
+        "updated_at": s.updated_at,
+    } for s in rows]
+    return ok({"items": items, "total": total, "page": page, "page_size": page_size})
+
+
+@router.post("/securities")
+def admin_create_security(body: SecurityCreateIn, request: Request,
+                          session: Session = Depends(get_session),
+                          admin: User = Depends(get_admin_user)):
+    """新增证券（用于把标的加入爬虫白名单）。同 (market,code) 已存在则更新。"""
+    sec = security_service.upsert_security(
+        session, body.market, body.code, body.name, body.currency,
+        crawl_enabled=body.crawl_enabled)
+    # upsert 对已存在记录不会改 crawl_enabled，这里再显式设一次保证生效
+    if sec.crawl_enabled != body.crawl_enabled:
+        security_service.set_crawl_enabled(session, body.market, body.code, body.crawl_enabled)
+        session.refresh(sec)
+    _log(session, admin, request, "security.create", "security", sec.id,
+         {"market": body.market, "code": body.code, "crawl_enabled": body.crawl_enabled})
+    session.commit()
+    return ok({"id": sec.id, "market": sec.market, "code": sec.code,
+               "name": sec.name, "crawl_enabled": bool(sec.crawl_enabled)})
+
+
+@router.patch("/securities/{security_id}/crawl-enabled")
+def admin_toggle_crawl_enabled(security_id: int, enabled: bool = Query(...),
+                               request: Request = None,
+                               session: Session = Depends(get_session),
+                               admin: User = Depends(get_admin_user)):
+    """切换某证券的爬虫白名单标记。"""
+    sec = session.get(Security, security_id)
+    if sec is None:
+        raise not_found("证券不存在")
+    updated = security_service.set_crawl_enabled(session, sec.market, sec.code, enabled)
+    _log(session, admin, request, "security.crawl_enabled", "security", security_id,
+         {"market": sec.market, "code": sec.code, "crawl_enabled": enabled})
+    session.commit()
+    return ok({"id": security_id, "crawl_enabled": enabled, "updated": updated})
 
 
 # ---------- 11.4 汇率与税率 ----------

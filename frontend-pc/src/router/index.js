@@ -23,6 +23,7 @@ const routes = [
     children: [
       { path: '', name: 'adminDashboard', component: () => import('../views/admin/Dashboard.vue'), meta: { title: '运营看板' } },
       { path: 'schedules', name: 'adminSchedules', component: () => import('../views/admin/Schedules.vue'), meta: { title: '分红预案审核' } },
+      { path: 'securities', name: 'adminSecurities', component: () => import('../views/admin/Securities.vue'), meta: { title: '证券与白名单' } },
       { path: 'users', name: 'adminUsers', component: () => import('../views/admin/Users.vue'), meta: { title: '用户管理' } },
       { path: 'config', name: 'adminConfig', component: () => import('../views/admin/Config.vue'), meta: { title: '汇率与税率' } },
       { path: 'notice', name: 'adminNotice', component: () => import('../views/admin/Notice.vue'), meta: { title: '公告与反馈' } },
@@ -45,7 +46,7 @@ router.beforeEach((to) => {
   if (to.meta.requiresAdmin && !user.isAdmin) {
     return { path: '/' }
   }
-  document.title = to.meta.title ? `${to.meta.title} · 息计` : '息计'
+  document.title = to.meta.title ? `${to.meta.title} · 攒息` : '攒息'
   return true
 })
 

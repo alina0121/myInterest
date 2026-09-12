@@ -221,3 +221,13 @@ class TaxRuleUpdate(BaseModel):
 class ConfigUpdateIn(BaseModel):
     """系统配置批量更新：{配置key: 新值}，敏感项传空串表示不修改。"""
     items: dict[str, Any] = Field(min_length=1)
+
+
+# ---------- admin：证券管理 ----------
+class SecurityCreateIn(BaseModel):
+    """后台新增证券（用于维护爬虫白名单）。"""
+    market: Market
+    code: str = Field(min_length=1, max_length=16)
+    name: str = Field(min_length=1, max_length=64)
+    currency: Currency = "CNY"
+    crawl_enabled: bool = False

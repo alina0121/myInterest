@@ -22,7 +22,7 @@ TAX_RULE_SEEDS = [
     ("bond", "债券利息", 0.00, None, None, "个人投资者暂免征收"),
 ]
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def _table_columns(session: Session, table: str) -> set[str]:
@@ -85,6 +85,18 @@ def migrate_securities(session: Session) -> None:
         session.rollback()
 
 
+def migrate_crawl_enabled(session: Session) -> None:
+    """v5：securities 表新增 crawl_enabled 字段（爬虫白名单标记）。
+
+    新库 create_all 已带该列；旧库用 ALTER TABLE 补列，默认 0（不爬）。
+    幂等：列已存在即跳过。
+    """
+    if "crawl_enabled" not in _table_columns(session, "securities"):
+        session.exec(text("ALTER TABLE securities ADD COLUMN crawl_enabled INTEGER DEFAULT 0"))
+        session.commit()
+        log.info("added column crawl_enabled to securities")
+
+
 def create_indexes(session: Session) -> None:
     """SQLModel 无法表达的部分唯一索引（docs/02 §6 已发布预案防重）。"""
     session.exec(text(
@@ -125,6 +137,8 @@ def init_db(seed_fx: bool = True) -> None:
         migrate_securities(session)
         # v4：先反填后删列，顺序不可换（反填 SELECT 依赖旧 name/currency）
         drop_legacy_schedule_columns(session)
+        # v5：securities 加 crawl_enabled 列（爬虫白名单）
+        migrate_crawl_enabled(session)
         # 升级库：按已有分红历史回填 securities.freq（新库为空，立即返回）
         from .services import security_service
         security_service.refresh_all_freq(session)

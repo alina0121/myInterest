@@ -108,6 +108,12 @@
               <el-input-number v-else-if="item.type === 'float'" v-model="formModel[item.key]"
                                :min="item.min ?? undefined" :max="item.max ?? undefined" :step="0.01"
                                :precision="4" :controls="false" :disabled="!canWrite" style="width: 200px" />
+              <!-- 标签式多选（白名单等逗号分隔列表） -->
+              <el-select v-else-if="item.widget === 'tags'" v-model="formModel[item.key]"
+                         multiple filterable allow-create default-first-option
+                         :disabled="!canWrite" style="width: 360px"
+                         placeholder="输入代码后回车添加，点 × 删除">
+              </el-select>
               <!-- 敏感字符串：脱敏展示，留空保存=不修改原值 -->
               <el-input v-else-if="sensitiveOf(item)" v-model="formModel[item.key]"
                         :placeholder="item.has_value ? `当前 ${item.mask}（留空表示不修改）` : '未配置，请填写'"
@@ -195,12 +201,19 @@ function applyGroups(groups) {
   configGroups.value = groups || []
   sensitiveKeys.clear()
   for (const g of configGroups.value) {
-    for (const item of g.items) {
-      // 后端对敏感项返回 mask 字段（非敏感项无此字段），据此识别并清空本地输入
-      if (item.mask !== undefined) sensitiveKeys.add(item.key)
-      formModel[item.key] = sensitiveOf(item) ? '' : item.value
+      for (const item of g.items) {
+        // 后端对敏感项返回 mask 字段（非敏感项无此字段），据此识别并清空本地输入
+        if (item.mask !== undefined) sensitiveKeys.add(item.key)
+        if (sensitiveOf(item)) {
+          formModel[item.key] = ''
+        } else if (item.widget === 'tags') {
+          // 逗号分隔字符串 → 数组，供 el-select 多选绑定
+          formModel[item.key] = (item.value || '').split(',').map((s) => s.trim()).filter(Boolean)
+        } else {
+          formModel[item.key] = item.value
+        }
+      }
     }
-  }
 }
 
 async function saveConfig() {
@@ -213,6 +226,12 @@ async function saveConfig() {
         // 敏感项：输入非空才提交（空串 = 保持原值，后端同约定）
         const t = (v || '').trim()
         if (t) items[item.key] = t
+      } else if (item.widget === 'tags') {
+        // 标签式：数组 → 逗号分隔字符串
+        const arr = Array.isArray(v) ? v.map((s) => String(s).trim()).filter(Boolean) : []
+        if (!arr.length) return ElMessage.warning(`「${item.label}」至少保留一项`)
+        const joined = arr.join(',')
+        if (joined !== item.value) items[item.key] = joined
       } else if (v === null || v === undefined || v === '') {
         return ElMessage.warning(`「${item.label}」不能留空`)
       } else if (JSON.stringify(v) !== JSON.stringify(item.value)) {

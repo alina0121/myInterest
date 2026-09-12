@@ -1,19 +1,54 @@
 <template>
   <div>
-    <!-- 状态 Tab + 操作 -->
-    <div class="toolbar">
-      <el-radio-group v-model="status" @change="load">
-        <el-radio-button value="pending">待审核 ({{ counts.pending || 0 }})</el-radio-button>
-        <el-radio-button value="published">已发布 ({{ counts.published || 0 }})</el-radio-button>
-        <el-radio-button value="rejected">已驳回 ({{ counts.rejected || 0 }})</el-radio-button>
+    <!-- 市场 Tab：分市场看「哪些数据没抓到」，pending=0 的市场说明爬虫没覆盖 -->
+    <div class="market-tabs">
+      <el-radio-group v-model="market" @change="onFilterChange">
+        <el-radio-button value="all">
+          全部 <span class="tab-count">{{ marketTotal('pending') }}</span>
+        </el-radio-button>
+        <el-radio-button v-for="m in MARKETS" :key="m.value" :value="m.value">
+          {{ m.label }}
+          <span class="tab-count" :class="{ 'tab-zero': marketPending(m.value) === 0 }">
+            {{ marketPending(m.value) }}
+          </span>
+        </el-radio-button>
       </el-radio-group>
+    </div>
+
+    <!-- 状态 Tab + 搜索 + 操作 -->
+    <div class="toolbar">
+      <el-radio-group v-model="status" @change="onFilterChange">
+        <el-radio-button value="pending">待审核 ({{ statusCount('pending') }})</el-radio-button>
+        <el-radio-button value="published">已发布 ({{ statusCount('published') }})</el-radio-button>
+        <el-radio-button value="rejected">已驳回 ({{ statusCount('rejected') }})</el-radio-button>
+      </el-radio-group>
+      <div class="toolbar-search">
+        <el-input v-model="keyword" placeholder="搜索代码/名称（如 000001 / 腾讯）" clearable
+                  style="width: 240px" @keyup.enter="search" @clear="onClear">
+          <template #append>
+            <el-button @click="search">查询</el-button>
+          </template>
+        </el-input>
+      </div>
       <div class="toolbar-right">
         <template v-if="status === 'pending'">
           <el-button type="primary" :disabled="!selectedIds.length" :loading="saving" @click="batchPublish">批量发布</el-button>
           <el-button type="danger" :disabled="!selectedIds.length" :loading="saving" @click="batchReject">批量驳回</el-button>
         </template>
         <el-button @click="crawlDlg = true">手动录入</el-button>
-        <el-button type="primary" :loading="crawling" @click="crawl">立即爬取</el-button>
+        <el-dropdown @command="crawl" trigger="click" :disabled="crawling">
+          <el-button type="primary" :loading="crawling">
+            立即爬取<el-icon class="el-icon--right"><arrow-down /></el-icon>
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="all">全部市场</el-dropdown-item>
+              <el-dropdown-item v-for="m in MARKETS" :key="m.value" :command="m.value">
+                仅{{ m.label }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
       </div>
     </div>
 
@@ -41,9 +76,6 @@
         <el-table-column prop="record_date" label="登记日" width="110" />
         <el-table-column prop="ex_date" label="除权日" width="110" />
         <el-table-column prop="pay_date" label="派息日" width="110" />
-        <el-table-column label="来源" width="90">
-          <template #default="{ row }">{{ sourceText(row.source) }}</template>
-        </el-table-column>
         <el-table-column label="置信度" width="130" align="center">
           <template #default="{ row }">
             <div class="conf-cell">
@@ -66,6 +98,12 @@
           </template>
         </el-table-column>
       </el-table>
+      <div class="pager">
+        <el-pagination background layout="total, sizes, prev, pager, next, jumper"
+                       :total="total" :page-size="pageSize" :current-page="page"
+                       :page-sizes="[20, 50, 100]"
+                       @size-change="onPageSizeChange" @current-change="onPageChange" />
+      </div>
       <div v-if="!list.length && !loading" class="empty-tip">该状态下暂无预案</div>
     </div>
     <p class="conf-rule">🕷️ 置信度规则：交易所/公司公告原文 &gt;90% 自动待发布；财经媒体转载 70–90% 待审核；用户提交 &lt;70% 必须人工核对。</p>
@@ -116,15 +154,21 @@
 
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { ArrowDown } from '@element-plus/icons-vue'
 import { apiAdminSchedules, apiAdminCreateSchedule, apiAdminApproveSchedule, apiAdminRejectSchedule, apiAdminCrawl, apiAdminBatchApprove } from '../../api'
 import { MARKETS, marketMap } from '../../utils/constants'
 
+const market = ref('all')        // 'all' | 'a_share' | 'us_stock' | 'hk_stock' | 'fund'
 const status = ref('pending')
 const list = ref([])
-const counts = ref({})
+const counts = ref({})           // 全局 status_counts（不分市场）
+const marketCounts = ref({})     // {a_share: {pending,published,rejected}, ...}
 const loading = ref(false)
 const crawling = ref(false)
+const page = ref(1)
+const pageSize = ref(20)
+const total = ref(0)
 const crawlDlg = ref(false)
 const saving = ref(false)
 const rejectDlg = ref(false)
@@ -132,13 +176,13 @@ const rejectRow = ref(null)
 const rejectReason = ref('')
 const tableRef = ref()
 const selectedIds = ref([])
+const keyword = ref('')
 
 const form = reactive({
   market: 'a_share', code: '', name: '', dps: undefined, currency: 'CNY',
   div_type: 'cash', record_date: '', ex_date: '', pay_date: '',
 })
 
-function sourceText(s) { return { crawl: '爬取', manual: '手动录入', admin: '后台' }[s] || s }
 function statusText(s) { return { pending: '待审核', published: '已发布', rejected: '已驳回' }[s] || s }
 function statusType(s) { return { pending: 'warning', published: 'success', rejected: 'danger' }[s] || 'info' }
 function confidenceClass(c) {
@@ -152,22 +196,66 @@ function confClass(c) {
   return 'fill-low'
 }
 
+// 某市场 pending 数（市场 tab 标签用，0 时标红，提示「爬虫没覆盖到」）
+function marketPending(m) {
+  return marketCounts.value[m]?.pending || 0
+}
+// 所有市场该状态总数（「全部」tab 标签用）
+function marketTotal(st) {
+  return counts.value[st] || 0
+}
+// 当前选中市场该状态计数（状态 tab 标签用）
+function statusCount(st) {
+  if (market.value === 'all') return counts.value[st] || 0
+  return marketCounts.value[market.value]?.[st] || 0
+}
+
+// 切换市场或状态都重新拉数据（回到第 1 页）
+function onFilterChange() {
+  tableRef.value?.clearSelection?.()
+  page.value = 1
+  load()
+}
+
+function onPageChange(p) { page.value = p; load() }
+function onPageSizeChange(s) { pageSize.value = s; page.value = 1; load() }
+
+// 搜索：按代码/名称过滤，回到第 1 页
+function search() {
+  tableRef.value?.clearSelection?.()
+  page.value = 1
+  load()
+}
+
+// 清空搜索框：恢复全量列表
+function onClear() {
+  keyword.value = ''
+  page.value = 1
+  load()
+}
+
 async function load() {
   loading.value = true
   try {
-    const data = await apiAdminSchedules({ status: status.value, page: 1, page_size: 50 })
+    const params = { status: status.value, page: page.value, page_size: pageSize.value }
+    if (market.value !== 'all') params.market = market.value
+    if (keyword.value.trim()) params.keyword = keyword.value.trim()
+    const data = await apiAdminSchedules(params)
     list.value = data.items || []
+    total.value = data.total || 0
     counts.value = data.status_counts || {}
+    marketCounts.value = data.market_counts || {}
   } finally {
     loading.value = false
   }
 }
 
-async function crawl() {
+async function crawl(m = 'all') {
   crawling.value = true
   try {
-    const r = await apiAdminCrawl()
-    ElMessage.success(`爬取完成：${r.fetched || 0} 条`)
+    const r = await apiAdminCrawl(m)
+    const label = m === 'all' ? '全部市场' : marketMap[m]?.label || m
+    ElMessage.success(`${label} 爬取完成：新增 ${r.new_pending || 0} 条`)
     load()
   } catch (e) { /* toast 已统一 */ } finally { crawling.value = false }
 }
@@ -261,12 +349,32 @@ onMounted(load)
 </script>
 
 <style scoped>
-.toolbar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
-.toolbar-right { display: flex; gap: 12px; }
+.market-tabs { margin-bottom: 12px; }
+.market-tabs :deep(.el-radio-button__inner) { padding: 8px 16px; }
+/* tab 上的 pending 数字徽章；0 时标红，提示爬虫没覆盖该市场 */
+.tab-count {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  margin-left: 4px;
+  background: #e2e8f0;
+  color: #475569;
+  border-radius: 10px;
+  font-size: 12px;
+  line-height: 16px;
+}
+.tab-zero {
+  background: #fee2e2;
+  color: #dc2626;
+}
+.toolbar { display: flex; align-items: center; gap: 16px; margin-bottom: 16px; flex-wrap: wrap; }
+.toolbar-search { flex: 0 0 auto; }
+.toolbar-right { margin-left: auto; display: flex; gap: 12px; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
 .bold { font-weight: 500; }
 .conf-low { color: #ef4444; }
 .empty-tip { color: #94a3b8; text-align: center; padding: 40px 0; font-size: 13px; }
+.pager { display: flex; justify-content: center; padding: 16px 0 4px; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
 /* 置信度进度条 */
 .conf-cell { display: flex; align-items: center; gap: 6px; }

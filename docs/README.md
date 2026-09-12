@@ -37,3 +37,6 @@
 - **前端**：uni-app + Vue3 + TS + Pinia，一套代码编译 H5 / App / 微信小程序
 - **后台**：P1 阶段用 sqladmin 自动生成（约 30 行配置），预案审核流做 1 个自定义页面
 - **用户量上千后**：SQLite → PostgreSQL 仅改连接串，业务代码不动
+
+测试账号: demo / demo123456(普通用户);
+另有 admin / password123   super_admin 账号

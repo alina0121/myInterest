@@ -41,7 +41,21 @@ SPECS: dict[str, dict] = {
         "label": "A股每次采集条数", "help": "东方财富接口每页条数（最新公告按日期倒序），日常增量 100 条足够。"},
     "crawl_us_tickers": {
         "category": "采集", "type": _STR, "default": "AAPL,MSFT,JNJ,KO,PG",
-        "label": "美股采集白名单", "help": "逗号分隔的美股代码；免费 Key 限 25 次/天，建议不超过 10 只。"},
+        "widget": "tags",
+        "label": "美股采集白名单", "help": "逐个输入美股代码（如 VOO、SCHD、AAPL），回车添加；免费 Key 限 25 次/天，建议不超过 10 只。"},
+    "crawl_hk_tickers": {
+        "category": "采集", "type": _STR, "default": "00700,09988,03690,01810,00941",
+        "widget": "tags",
+        "label": "港股采集白名单", "help": "逐个输入港股 5 位数字代码（如 00700、09988），回车添加；建议不超过 20 只。"},
+    "crawl_hk_rate_sleep": {
+        "category": "采集", "type": _INT, "default": 1, "min": 0, "max": 10,
+        "label": "港股采集间隔(秒)", "help": "东方财富 F10 接口无公开限流，串行拉取时每只之间的等待秒数，默认 1 秒。"},
+    "crawl_fund_page_size": {
+        "category": "采集", "type": _INT, "default": 100, "min": 10, "max": 200,
+        "label": "基金每页采集条数", "help": "天天基金分红列表接口每页条数，按登记日倒序增量抓取。"},
+    "crawl_fund_max_pages": {
+        "category": "采集", "type": _INT, "default": 10, "min": 1, "max": 50,
+        "label": "基金最大采集页数", "help": "单次最多翻页数，防止接口异常时无限翻页；正常增量遇到整页已入库即停止。"},
     "crawl_us_rate_sleep": {
         "category": "采集", "type": _INT, "default": 12, "min": 0, "max": 60,
         "label": "美股采集间隔(秒)", "help": "Alpha Vantage 免费层限 5 次/分钟，串行拉取时每只之间的等待秒数。"},
@@ -190,6 +204,14 @@ def validate_and_store_text(key: str, value) -> str:
                                "「美股采集白名单」需为逗号分隔的代码，如 AAPL,MSFT",
                                status=422)
             text = ",".join(parts)  # 归一化：去空格、转大写
+        elif key == "crawl_hk_tickers" and text:
+            # 港股代码为 5 位数字（如 00700）
+            parts = [p.strip() for p in text.split(",") if p.strip()]
+            if not all(p.isdigit() and len(p) == 5 for p in parts):
+                raise AppError(Codes.VALIDATION,
+                               "「港股采集白名单」需为逗号分隔的 5 位数字代码，如 00700,09988",
+                               status=422)
+            text = ",".join(parts)
         elif key == "scheduler_hours":
             try:
                 hours = [int(h) for h in text.split(",") if h.strip()]
@@ -257,6 +279,7 @@ def admin_view() -> list[dict]:
             "key": key, "label": spec["label"], "help": spec["help"],
             "type": spec["type"], "category": spec["category"],
             "min": spec.get("min"), "max": spec.get("max"),
+            "widget": spec.get("widget"),  # 可选渲染控件：tags=标签式多选
             "overridden": overridden,  # 是否被管理员改过（DB 有覆盖行）
         }
         if sensitive:

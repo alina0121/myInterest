@@ -1,37 +1,38 @@
 <template>
   <div class="admin-shell">
-    <!-- 后台侧边栏（深色，对齐原型 adminScreen） -->
-    <aside class="admin-sidebar">
-      <div class="admin-brand">
-        <div class="admin-logo">息</div>
-        <div>
-          <div class="admin-name">息计 · 运营后台</div>
-          <div class="admin-ver">Admin Console v1.0</div>
+    <!-- 顶部导航栏（深色，区分前台） -->
+    <header class="admin-topbar">
+      <div class="topbar-left">
+        <div class="brand" @click="$router.push('/admin')">
+          <div class="logo">攒</div>
+          <div class="brand-text">
+            <div class="brand-name">攒息 · 运营后台</div>
+            <div class="brand-sub">Admin Console</div>
+          </div>
         </div>
+        <nav class="admin-nav">
+          <div v-for="item in menus" :key="item.path"
+               class="nav-item" :class="{ active: isActive(item.path) }"
+               @click="$router.push(item.path)">
+            <span>{{ item.icon }}</span><span>{{ item.label }}</span>
+          </div>
+        </nav>
       </div>
-      <nav class="admin-nav">
-        <div v-for="item in menus" :key="item.path"
-             class="admin-nav-item" :class="{ active: isActive(item.path) }"
-             @click="$router.push(item.path)">
-          <span>{{ item.icon }}</span><span>{{ item.label }}</span>
-          <span v-if="item.badge" class="nav-badge">{{ item.badge }}</span>
+      <div class="topbar-right">
+        <span class="isolation-tip">数据隔离 · 操作留痕</span>
+        <div class="admin-meta">
+          <span class="admin-name">{{ userStore.user?.username }}</span>
+          <el-tag size="small" type="warning">{{ roleText }}</el-tag>
         </div>
-      </nav>
-      <div class="admin-foot">
-        管理员：{{ userStore.user?.username }}<br />
-        角色：{{ roleText }}
+        <el-button @click="$router.push('/')">← 返回前台</el-button>
       </div>
-    </aside>
+    </header>
 
-    <!-- 主区域 -->
+    <!-- 主内容区 -->
     <div class="admin-main">
-      <header class="admin-topbar">
-        <span class="crumb">{{ $route.meta.title }}</span>
-        <div class="topbar-right">
-          <span class="isolation-tip">后台与用户 App 数据隔离 · 操作留痕</span>
-          <el-button @click="$router.push('/')">← 返回前台 App</el-button>
-        </div>
-      </header>
+      <div class="page-header">
+        <h1 class="page-title">{{ $route.meta.title }}</h1>
+      </div>
       <div class="admin-content">
         <router-view />
       </div>
@@ -41,16 +42,16 @@
 
 <script setup>
 import { computed } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { useUserStore } from '../store/user'
 
-const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
 
 const menus = [
   { path: '/admin', label: '运营看板', icon: '📊' },
   { path: '/admin/schedules', label: '分红预案审核', icon: '📋' },
+  { path: '/admin/securities', label: '证券与白名单', icon: '🏷️' },
   { path: '/admin/users', label: '用户管理', icon: '👥' },
   { path: '/admin/config', label: '汇率与税率', icon: '💱' },
   { path: '/admin/notice', label: '公告与反馈', icon: '📢' },
@@ -67,39 +68,43 @@ function isActive(path) {
 </script>
 
 <style scoped>
-.admin-shell { display: flex; min-height: 100vh; background: #f1f5f9; }
-.admin-sidebar {
-  width: 224px; flex-shrink: 0; background: #0f172a; color: #cbd5e1;
-  display: flex; flex-direction: column; position: sticky; top: 0; height: 100vh;
-}
-.admin-brand { display: flex; align-items: center; gap: 10px; padding: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
-.admin-logo {
-  width: 32px; height: 32px; border-radius: 8px; background: rgba(255,255,255,0.1);
-  color: #fff; font-weight: 700; display: flex; align-items: center; justify-content: center;
-}
-.admin-name { color: #fff; font-weight: 700; font-size: 14px; }
-.admin-ver { font-size: 10px; color: #94a3b8; }
-.admin-nav { flex: 1; padding: 12px; }
-.admin-nav-item {
-  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
-  border-radius: 8px; font-size: 14px; cursor: pointer; margin-bottom: 4px;
-  transition: background 0.15s;
-}
-.admin-nav-item:hover { background: rgba(255,255,255,0.08); }
-.admin-nav-item.active { background: rgba(255,255,255,0.12); color: #fff; font-weight: 500; }
-.nav-badge {
-  margin-left: auto; font-size: 10px; background: #f59e0b; color: #fff;
-  border-radius: 9999px; padding: 1px 6px;
-}
-.admin-foot { padding: 12px; border-top: 1px solid rgba(255,255,255,0.1); font-size: 11px; color: #94a3b8; }
+.admin-shell { min-height: 100vh; display: flex; flex-direction: column; background: #f1f5f9; }
 
-.admin-main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+/* 顶部导航栏（深色） */
 .admin-topbar {
-  background: #fff; border-bottom: 1px solid #e2e8f0;
-  padding: 12px 24px; display: flex; align-items: center; justify-content: space-between;
+  height: 60px; background: #0f172a; color: #cbd5e1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 28px; position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
 }
-.crumb { font-size: 14px; color: #64748b; }
+.topbar-left { display: flex; align-items: center; gap: 32px; }
+
+.brand { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.logo {
+  width: 34px; height: 34px; border-radius: 8px; background: rgba(255,255,255,0.12);
+  color: #fff; font-weight: 700; font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+}
+.brand-text { line-height: 1.2; }
+.brand-name { color: #fff; font-weight: 700; font-size: 15px; letter-spacing: 0.5px; }
+.brand-sub { font-size: 10px; color: #64748b; }
+
+.admin-nav { display: flex; align-items: center; gap: 2px; }
+.nav-item {
+  display: flex; align-items: center; gap: 6px; padding: 8px 14px;
+  border-radius: 8px; font-size: 14px; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap; color: #94a3b8;
+}
+.nav-item:hover { background: rgba(255,255,255,0.08); color: #fff; }
+.nav-item.active { background: rgba(255,255,255,0.15); color: #fff; font-weight: 500; }
+
 .topbar-right { display: flex; align-items: center; gap: 16px; }
-.isolation-tip { font-size: 12px; color: #94a3b8; }
-.admin-content { flex: 1; padding: 24px; overflow-y: auto; }
+.isolation-tip { font-size: 12px; color: #64748b; }
+.admin-meta { display: flex; align-items: center; gap: 8px; }
+.admin-name { font-size: 13px; color: #cbd5e1; }
+
+.admin-main { flex: 1; display: flex; flex-direction: column; }
+.page-header { padding: 20px 28px 0; }
+.page-title { font-size: 20px; font-weight: 700; margin: 0; color: #0f172a; }
+.admin-content { flex: 1; padding: 16px 28px 28px; }
 </style>

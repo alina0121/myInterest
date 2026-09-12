@@ -31,5 +31,9 @@ class Security(SQLModel, table=True):
     latest_price: Optional[float] = None    # 最新价（爬虫/行情获取，不要求实时）
     price_updated_at: Optional[str] = None  # 价格更新时间
     freq: str = Field(default="unknown")    # 派息频率：按历年分红预案次数自动推断（security_service.refresh_*）
+    # 爬虫白名单标记：
+    #   美股/港股：crawl_enabled=True 的标的才会被爬虫拉取（替代原配置项 crawl_*_tickers）
+    #   A股/基金：爬虫走全量列表接口，此字段暂不参与过滤；预留用于后续黑名单
+    crawl_enabled: bool = Field(default=False)
     created_at: str = Field(default_factory=now_str)
     updated_at: str = Field(default_factory=now_str)

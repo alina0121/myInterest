@@ -3,10 +3,10 @@
     <div class="login-card">
       <!-- 品牌区 -->
       <div class="brand">
-        <div class="logo">息</div>
+        <div class="logo">攒</div>
         <div>
-          <div class="brand-name">息计</div>
-          <div class="brand-sub">多用户分红记录助手</div>
+          <div class="brand-name">攒息</div>
+          <div class="brand-sub">时间的朋友 · 分红记录助手</div>
         </div>
       </div>
 
