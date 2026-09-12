@@ -21,13 +21,16 @@ def get_owned_holding(session: Session, user: User, holding_id: int) -> Holding:
     return h
 
 
-def holding_out(session: Session, h: Holding, system_freq: str | None = None) -> dict:
+def holding_out(session: Session, h: Holding, system_freq: str | None = None,
+                latest_price: float | None = None) -> dict:
     return {
         "id": h.id, "market": h.market, "code": h.code, "name": h.name,
         "currency": h.currency, "account": h.account, "freq": h.freq,
         # 系统按分红历史推断的频率（securities.freq），供前端展示/「恢复系统推断」
         "system_freq": system_freq or "unknown",
-        "note": h.note, "current_price": h.current_price,
+        "note": h.note,
+        # 最新价：优先用 securities.latest_price（爬虫实时更新），回落 holdings.current_price（创建时快照）
+        "current_price": latest_price if latest_price is not None else h.current_price,
         "created_at": h.created_at,
         **lots_service.computed_summary(session, h),
     }
@@ -50,9 +53,14 @@ def list_holdings(market: str | None = None, keyword: str | None = None,
                     if kw in h.code.lower() or kw in h.name.lower()]
     sec_map = security_service.security_map(
         session, [(h.market, h.code) for h in holdings])
-    items = [
-        holding_out(session, h, (sec.freq if (sec := sec_map.get((h.market, h.code))) else "unknown"))
-        for h in holdings]
+    items = []
+    for h in holdings:
+        sec = sec_map.get((h.market, h.code))
+        latest_price = sec.latest_price if sec and sec.latest_price else h.current_price
+        items.append(holding_out(
+            session, h,
+            system_freq=(sec.freq if sec else "unknown"),
+            latest_price=latest_price))
     return ok({"items": items, "total": len(holdings)})
 
 
@@ -92,7 +100,10 @@ def get_holding(holding_id: int, session: Session = Depends(get_session),
                 user: User = Depends(get_current_user)):
     h = get_owned_holding(session, user, holding_id)
     sec = security_service.get_security(session, h.market, h.code)
-    return ok(holding_out(session, h, sec.freq if sec else "unknown"))
+    latest_price = sec.latest_price if sec and sec.latest_price else h.current_price
+    return ok(holding_out(session, h,
+                          system_freq=(sec.freq if sec else "unknown"),
+                          latest_price=latest_price))
 
 
 @router.patch("/{holding_id}")

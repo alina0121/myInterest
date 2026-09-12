@@ -1,0 +1,795 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>攒息 - 首页概览设计图</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: #f5f5f0;
+    color: #1a1a1a;
+    padding: 40px 20px;
+  }
+  h1 {
+    text-align: center;
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 8px;
+  }
+  .subtitle {
+    text-align: center;
+    color: #999;
+    font-size: 14px;
+    margin-bottom: 40px;
+  }
+  .views {
+    display: flex;
+    gap: 40px;
+    justify-content: center;
+    flex-wrap: wrap;
+  }
+
+  /* ========== PC 端视图 ========== */
+  .pc-view {
+    width: 880px;
+    background: #fff;
+    border-radius: 16px;
+    box-shadow: 0 4px 24px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+  .pc-header {
+    background: #0f172a;
+    color: #fff;
+    padding: 16px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .pc-header .brand { font-weight: 700; font-size: 16px; }
+  .pc-header nav { display: flex; gap: 24px; font-size: 14px; }
+  .pc-header nav a { color: #94a3b8; text-decoration: none; }
+  .pc-header nav a.active { color: #fff; }
+
+  .pc-body { padding: 28px; }
+
+  /* 主卡：深色渐变，核心指标 */
+  .hero-card {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    border-radius: 16px;
+    padding: 28px 32px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero-card::before {
+    content: '';
+    position: absolute;
+    top: -50%; right: -20%;
+    width: 400px; height: 400px;
+    background: radial-gradient(circle, rgba(255,165,0,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 24px;
+  }
+  .hero-label {
+    font-size: 13px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 2px;
+  }
+  .hero-value {
+    font-size: 44px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .hero-currency {
+    font-size: 20px;
+    font-weight: 400;
+    margin-right: 4px;
+    opacity: 0.7;
+  }
+  .hero-edit {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: rgba(255,255,255,0.6);
+    cursor: pointer;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.2);
+    transition: all 0.2s;
+    z-index: 1;
+  }
+  .hero-edit:hover {
+    background: rgba(255,255,255,0.1);
+    color: #fff;
+  }
+  .hero-edit svg { width: 14px; height: 14px; }
+
+  /* 网格指标 */
+  .metric-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+    position: relative;
+    z-index: 1;
+  }
+  .metric-item {
+    padding: 16px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+  .metric-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 6px;
+  }
+  .metric-value {
+    font-size: 22px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .metric-value.positive { color: #4ade80; }
+  .metric-value.negative { color: #f87171; }
+  .metric-sub {
+    font-size: 11px;
+    color: rgba(255,255,255,0.4);
+    margin-top: 4px;
+  }
+
+  /* 图表区域 */
+  .section-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin: 28px 0 16px;
+    color: #1a1a1a;
+  }
+  .chart-row {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+  }
+  .chart-card {
+    background: #fff;
+    border: 1px solid #eee;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .chart-card h4 {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    color: #333;
+  }
+  .bar-chart {
+    display: flex;
+    align-items: flex-end;
+    height: 180px;
+    gap: 8px;
+  }
+  .bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .bar-wrap {
+    height: 140px;
+    display: flex;
+    align-items: flex-end;
+    width: 100%;
+    justify-content: center;
+  }
+  .bar {
+    width: 18px;
+    background: linear-gradient(180deg, #1e3a8a 0%, #3b82f6 100%);
+    border-radius: 4px 4px 0 0;
+    min-height: 4px;
+  }
+  .bar-col span {
+    font-size: 10px;
+    color: #999;
+    margin-top: 6px;
+  }
+
+  /* 右侧信息 */
+  .info-list { display: flex; flex-direction: column; gap: 12px; }
+  .info-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 13px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f5f5f5;
+  }
+  .info-row .label { color: #999; }
+  .info-row .value { font-weight: 500; color: #333; }
+
+  /* ========== 移动端视图 ========== */
+  .mobile-view {
+    width: 390px;
+    background: #fff;
+    border-radius: 24px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.12);
+    overflow: hidden;
+    position: relative;
+  }
+  .mobile-statusbar {
+    background: #0f172a;
+    color: #fff;
+    padding: 12px 20px 4px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .mobile-nav {
+    background: #0f172a;
+    color: #fff;
+    padding: 10px 20px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .mobile-body {
+    padding: 16px;
+    padding-bottom: 80px;
+  }
+
+  /* 移动端主卡 */
+  .m-hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    border-radius: 16px;
+    padding: 24px 20px;
+    color: #fff;
+    position: relative;
+    overflow: hidden;
+  }
+  .m-hero::before {
+    content: '';
+    position: absolute;
+    top: -30%; right: -20%;
+    width: 250px; height: 250px;
+    background: radial-gradient(circle, rgba(255,165,0,0.15) 0%, transparent 70%);
+    border-radius: 50%;
+  }
+  .m-hero-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 20px;
+    position: relative;
+    z-index: 1;
+  }
+  .m-hero-label {
+    font-size: 12px;
+    color: rgba(255,255,255,0.5);
+    letter-spacing: 2px;
+  }
+  .m-hero-value {
+    font-size: 36px;
+    font-weight: 700;
+    position: relative;
+    z-index: 1;
+  }
+  .m-hero-edit {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    padding: 4px 10px;
+    border: 1px solid rgba(255,255,255,0.2);
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    position: relative;
+    z-index: 1;
+  }
+  .m-metric-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+    position: relative;
+    z-index: 1;
+  }
+  .m-metric-item {
+    padding: 12px 0;
+    border-top: 1px solid rgba(255,255,255,0.1);
+  }
+  .m-metric-label {
+    font-size: 11px;
+    color: rgba(255,255,255,0.5);
+    margin-bottom: 4px;
+  }
+  .m-metric-value {
+    font-size: 17px;
+    font-weight: 600;
+    color: #fff;
+  }
+  .m-metric-value.positive { color: #4ade80; }
+  .m-metric-value.negative { color: #f87171; }
+
+  /* 移动端图表 */
+  .m-section-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin: 20px 4px 12px;
+    color: #1a1a1a;
+  }
+  .m-chart-card {
+    background: #fff;
+    border-radius: 12px;
+    padding: 16px;
+    border: 1px solid #eee;
+  }
+  .m-bar-chart {
+    display: flex;
+    align-items: flex-end;
+    height: 120px;
+    gap: 4px;
+  }
+  .m-bar-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .m-bar-wrap {
+    height: 90px;
+    display: flex;
+    align-items: flex-end;
+    width: 100%;
+    justify-content: center;
+  }
+  .m-bar {
+    width: 12px;
+    background: linear-gradient(180deg, #1e3a8a 0%, #3b82f6 100%);
+    border-radius: 3px 3px 0 0;
+    min-height: 3px;
+  }
+  .m-bar-col span {
+    font-size: 9px;
+    color: #999;
+    margin-top: 4px;
+  }
+
+  /* 移动端底部 Tab */
+  .m-tabbar {
+    position: absolute;
+    bottom: 0;
+    left: 0; right: 0;
+    height: 60px;
+    background: #fff;
+    border-top: 1px solid #eee;
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+  }
+  .m-tab {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 10px;
+    color: #999;
+  }
+  .m-tab.active { color: #1e3a8a; }
+  .m-tab svg { width: 22px; height: 22px; }
+
+  /* ========== 设置弹窗 ========== */
+  .mobile-view.settings { margin-top: 40px; }
+  .m-setting-header {
+    display: flex;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid #f0f0f0;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .m-setting-header .back {
+    font-size: 20px;
+    margin-right: 12px;
+    cursor: pointer;
+  }
+  .m-setting-body { padding: 16px 20px 100px; }
+  .m-setting-hint {
+    background: #f8f8f8;
+    border-radius: 8px;
+    padding: 12px;
+    font-size: 12px;
+    color: #666;
+    text-align: center;
+    margin-bottom: 16px;
+  }
+  .m-setting-group-title {
+    font-size: 13px;
+    color: #999;
+    margin: 16px 0 8px;
+  }
+  .m-metric-row {
+    display: flex;
+    align-items: center;
+    padding: 14px 0;
+    border-bottom: 1px solid #f5f5f5;
+    cursor: pointer;
+  }
+  .m-metric-row:last-child { border-bottom: none; }
+  .m-metric-num {
+    width: 26px;
+    height: 26px;
+    background: #1a1a2e;
+    color: #fff;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+  .m-metric-plus {
+    width: 26px;
+    height: 26px;
+    background: #f0f0f0;
+    color: #999;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    margin-right: 12px;
+    flex-shrink: 0;
+  }
+  .m-metric-info { flex: 1; }
+  .m-metric-name {
+    font-size: 15px;
+    font-weight: 500;
+    color: #1a1a1a;
+  }
+  .m-metric-desc {
+    font-size: 12px;
+    color: #999;
+    margin-top: 2px;
+  }
+  .m-metric-val {
+    font-size: 14px;
+    color: #1a1a1a;
+    font-weight: 500;
+  }
+  .m-metric-val.positive { color: #16a34a; }
+  .m-metric-val.negative { color: #dc2626; }
+  .m-save-btn {
+    position: absolute;
+    bottom: 20px;
+    left: 20px; right: 20px;
+    height: 48px;
+    background: #1a1a2e;
+    color: #fff;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+  }
+</style>
+</head>
+<body>
+
+<h1>攒息 · 首页概览设计稿</h1>
+<p class="subtitle">PC 端（左）&nbsp;&nbsp;|&nbsp;&nbsp;移动端（右）&nbsp;&nbsp;|&nbsp;&nbsp;指标可自定义</p>
+
+<div class="views">
+
+  <!-- PC 端首页 -->
+  <div class="pc-view">
+    <div class="pc-header">
+      <div class="brand">攒息 · 时间的朋友</div>
+      <nav>
+        <a href="#" class="active">概览</a>
+        <a href="#">持仓</a>
+        <a href="#">分红</a>
+        <a href="#">日历</a>
+        <a href="#">统计</a>
+      </nav>
+    </div>
+    <div class="pc-body">
+      <!-- 主卡 -->
+      <div class="hero-card">
+        <div class="hero-top">
+          <div>
+            <div class="hero-label">预测年度分红</div>
+            <div class="hero-value"><span class="hero-currency">¥</span>3,901.11</div>
+          </div>
+          <div class="hero-edit" onclick="alert('打开指标设置')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            自定义指标
+          </div>
+        </div>
+        <div class="metric-grid">
+          <div class="metric-item">
+            <div class="metric-label">今年已收</div>
+            <div class="metric-value">¥551.02</div>
+            <div class="metric-sub">当年已到账</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">总成本</div>
+            <div class="metric-value">¥10.31万</div>
+            <div class="metric-sub">买入成本合计</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">总市值</div>
+            <div class="metric-value">¥9.24万</div>
+            <div class="metric-sub">T-1 最新价</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">成本息率</div>
+            <div class="metric-value">3.78%</div>
+            <div class="metric-sub">预测年分红 ÷ 总成本</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">市值息率</div>
+            <div class="metric-value">4.22%</div>
+            <div class="metric-sub">预测年分红 ÷ 总市值</div>
+          </div>
+          <div class="metric-item">
+            <div class="metric-label">月均预测</div>
+            <div class="metric-value">¥325.09</div>
+            <div class="metric-sub">年分红 ÷ 12</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图表 + 信息 -->
+      <div class="section-title">分红趋势 · 近 12 个月</div>
+      <div class="chart-row">
+        <div class="chart-card">
+          <h4>月度分红（CNY）</h4>
+          <div class="bar-chart">
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:30px"></div></div><span>9月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:60px"></div></div><span>10月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:15px"></div></div><span>11月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:80px"></div></div><span>12月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:45px"></div></div><span>1月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:100px"></div></div><span>2月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:25px"></div></div><span>3月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:70px"></div></div><span>4月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:55px"></div></div><span>5月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:90px"></div></div><span>6月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:40px"></div></div><span>7月</span></div>
+            <div class="bar-col"><div class="bar-wrap"><div class="bar" style="height:65px"></div></div><span>8月</span></div>
+          </div>
+        </div>
+        <div class="chart-card">
+          <h4>持仓快照</h4>
+          <div class="info-list">
+            <div class="info-row"><span class="label">持仓只数</span><span class="value">16 只</span></div>
+            <div class="info-row"><span class="label">累计收息</span><span class="value">¥551.02</span></div>
+            <div class="info-row"><span class="label">浮动盈亏</span><span class="value" style="color:#dc2626">-¥1.07万</span></div>
+            <div class="info-row"><span class="label">盈亏率</span><span class="value" style="color:#dc2626">-10.36%</span></div>
+            <div class="info-row"><span class="label">净投入</span><span class="value">¥10.35万</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 移动端首页 -->
+  <div class="mobile-view">
+    <div class="mobile-statusbar">
+      <span>16:11</span>
+      <span>攒息 · 时间的朋友</span>
+      <span>📶 🔋</span>
+    </div>
+    <div class="mobile-body">
+      <!-- 主卡 -->
+      <div class="m-hero">
+        <div class="m-hero-top">
+          <div>
+            <div class="m-hero-label">预测年度分红</div>
+            <div class="m-hero-value">¥3,901.11</div>
+          </div>
+          <div class="m-hero-edit">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            自定义
+          </div>
+        </div>
+        <div class="m-metric-grid">
+          <div class="m-metric-item">
+            <div class="m-metric-label">今年已收</div>
+            <div class="m-metric-value">¥551</div>
+          </div>
+          <div class="m-metric-item">
+            <div class="m-metric-label">总成本</div>
+            <div class="m-metric-value">¥10.3万</div>
+          </div>
+          <div class="m-metric-item">
+            <div class="m-metric-label">总市值</div>
+            <div class="m-metric-value">¥9.2万</div>
+          </div>
+          <div class="m-metric-item">
+            <div class="m-metric-label">成本息率</div>
+            <div class="m-metric-value">3.78%</div>
+          </div>
+          <div class="m-metric-item">
+            <div class="m-metric-label">市值息率</div>
+            <div class="m-metric-value">4.22%</div>
+          </div>
+          <div class="m-metric-item">
+            <div class="m-metric-label">月均预测</div>
+            <div class="m-metric-value">¥325</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 图表 -->
+      <div class="m-section-title">分红趋势 · 近 12 个月</div>
+      <div class="m-chart-card">
+        <div class="m-bar-chart">
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:12px"></div></div><span>9月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:24px"></div></div><span>10月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:6px"></div></div><span>11月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:32px"></div></div><span>12月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:18px"></div></div><span>1月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:40px"></div></div><span>2月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:10px"></div></div><span>3月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:28px"></div></div><span>4月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:22px"></div></div><span>5月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:36px"></div></div><span>6月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:16px"></div></div><span>7月</span></div>
+          <div class="m-bar-col"><div class="m-bar-wrap"><div class="m-bar" style="height:26px"></div></div><span>8月</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 底部 Tab -->
+    <div class="m-tabbar">
+      <div class="m-tab active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+        <span>概览</span>
+      </div>
+      <div class="m-tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3h18v18H3z"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+        <span>持仓</span>
+      </div>
+      <div class="m-tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        <span>分红</span>
+      </div>
+      <div class="m-tab">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span>我的</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 移动端 设置页 -->
+  <div class="mobile-view settings">
+    <div class="mobile-statusbar">
+      <span>16:11</span>
+      <span>攒息 · 时间的朋友</span>
+      <span>📶 🔋</span>
+    </div>
+    <div class="m-setting-header">
+      <span class="back">‹</span>
+      <span>汇总指标设置</span>
+    </div>
+    <div class="m-setting-body">
+      <div class="m-setting-hint">
+        框内为你正在设置的汇总指标<br/>
+        <span style="opacity:0.6">已选 6 / 12</span>
+      </div>
+
+      <div class="m-setting-group-title">已选指标 · 点击可取消</div>
+      <div class="m-metric-row">
+        <div class="m-metric-num">1</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">今年已收</div>
+          <div class="m-metric-desc">当年已入账分红总额</div>
+        </div>
+        <div class="m-metric-val">¥551.02</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-num">2</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">总成本</div>
+          <div class="m-metric-desc">各股买入成本 × 数量之和</div>
+        </div>
+        <div class="m-metric-val">¥10.31万</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-num">3</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">总市值</div>
+          <div class="m-metric-desc">最新价 × 数量之和（T-1）</div>
+        </div>
+        <div class="m-metric-val">¥9.24万</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-num">4</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">成本息率</div>
+          <div class="m-metric-desc">预测年分红 ÷ 总成本</div>
+        </div>
+        <div class="m-metric-val">3.78%</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-num">5</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">市值息率</div>
+          <div class="m-metric-desc">预测年分红 ÷ 总市值</div>
+        </div>
+        <div class="m-metric-val">4.22%</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-num">6</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">月均预测分红</div>
+          <div class="m-metric-desc">预测年分红 ÷ 12</div>
+        </div>
+        <div class="m-metric-val">¥325.09</div>
+      </div>
+
+      <div class="m-setting-group-title">可选指标 · 点击可加入</div>
+      <div class="m-metric-row">
+        <div class="m-metric-plus">+</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">日均预测分红</div>
+          <div class="m-metric-desc">预测年分红 ÷ 365</div>
+        </div>
+        <div class="m-metric-val">¥10.69</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-plus">+</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">浮动盈亏</div>
+          <div class="m-metric-desc">总市值 − 总成本（T-1）</div>
+        </div>
+        <div class="m-metric-val negative">-¥1.07万</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-plus">+</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">盈亏率</div>
+          <div class="m-metric-desc">浮动盈亏 ÷ 总成本（T-1）</div>
+        </div>
+        <div class="m-metric-val negative">-10.36%</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-plus">+</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">累计收息</div>
+          <div class="m-metric-desc">历史已收分红总额（不限年）</div>
+        </div>
+        <div class="m-metric-val">¥551.02</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-plus">+</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">净投入</div>
+          <div class="m-metric-desc">买入总额 − 卖出总额</div>
+        </div>
+        <div class="m-metric-val">¥10.35万</div>
+      </div>
+      <div class="m-metric-row">
+        <div class="m-metric-plus">+</div>
+        <div class="m-metric-info">
+          <div class="m-metric-name">持仓只数</div>
+          <div class="m-metric-desc">当前持有标的数量</div>
+        </div>
+        <div class="m-metric-val">16 只</div>
+      </div>
+    </div>
+    <button class="m-save-btn">确认保存</button>
+  </div>
+
+</div>
+
+</body>
+</html>

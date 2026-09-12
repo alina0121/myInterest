@@ -43,6 +43,10 @@
     {
       "path": "pages/dividends/add",
       "style": { "navigationBarTitleText": "记一笔分红" }
+    },
+    {
+      "path": "pages/index/metrics",
+      "style": { "navigationBarTitleText": "指标设置" }
     }
   ],
   "tabBar": {

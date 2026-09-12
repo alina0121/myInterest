@@ -38,6 +38,9 @@ export const apiDeleteDividend = (id) => del(`/api/dividends/${id}`)
 
 // ---------- 统计 / 日历 / 设置 ----------
 export const apiSummary = () => get('/api/stats/summary')
+export const apiEnhancedSummary = () => get('/api/stats/enhanced-summary')
+export const apiDashboardMetrics = () => get('/api/stats/dashboard-metrics')
+export const apiSaveDashboardMetrics = (selected) => put('/api/stats/dashboard-metrics', { selected })
 export const apiMonthlyTrend = (range = '12m') => get('/api/stats/monthly-trend', { range })
 export const apiByMarket = () => get('/api/stats/by-market')
 export const apiForecast = () => get('/api/stats/forecast')

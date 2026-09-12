@@ -1,59 +1,83 @@
 <template>
   <view class="page">
     <!-- #ifdef H5 -->
-    <WebLayout title="总览看板" />
+    <WebLayout title="攒息" />
     <!-- #endif -->
 
-    <!-- 2×2 核心指标卡 -->
-    <view class="stat-grid">
-      <view class="stat-card">
-        <view class="stat-label">{{ year }}年度分红</view>
-        <view class="stat-value">¥{{ fmt(summary.year_dividend_cny) }}</view>
-        <view class="stat-foot" :class="growthClass">{{ growthText }}</view>
-      </view>
-      <view class="stat-card">
-        <view class="stat-label">本月到账</view>
-        <view class="stat-value">¥{{ fmt(summary.month_dividend_cny) }}</view>
-        <view class="stat-foot text-muted">{{ summary.month_count || 0 }} 笔</view>
-      </view>
-      <view class="stat-card">
-        <view class="stat-label">累计分红</view>
-        <view class="stat-value">¥{{ fmt(summary.total_dividend_cny) }}</view>
-        <view class="stat-foot text-muted">{{ summary.since_year ? '自 ' + summary.since_year : '暂无记录' }}</view>
-      </view>
-      <view class="stat-card">
-        <view class="stat-label">持仓数量</view>
-        <view class="stat-value">{{ summary.holding_count || 0 }} 只</view>
-        <view class="stat-foot text-muted">{{ marketFoot }}</view>
-      </view>
-    </view>
-
-    <!-- 分红趋势（近12月） -->
-    <view class="section-title">分红趋势（近12月）</view>
-    <view class="card trend-card">
-      <view class="bars">
-        <view class="bar-col" v-for="(m, i) in trend.months" :key="i">
-          <view class="bar-wrap">
-            <view class="bar" :style="{ height: barHeight(trend.amounts_cny[i]) + 'rpx' }"></view>
+    <!-- ========== 深色主卡 ========== -->
+    <view class="hero-card">
+      <view class="hero-top">
+        <view>
+          <view class="hero-label">{{ mainMetricName }}</view>
+          <view class="hero-value">
+            <text v-if="mainMetric?.format === 'currency'" class="hero-currency">¥</text>
+            {{ formatMetricValue(mainMetric, enhanced[mainMetricKey]) }}
           </view>
-          <view class="bar-label">{{ m.slice(5) }}</view>
+          <view class="hero-sub" v-if="enhanced.year_growth !== null && enhanced.year_growth !== undefined">
+            <text :class="enhanced.year_growth >= 0 ? 'up' : 'down'">
+              {{ enhanced.year_growth >= 0 ? '↑' : '↓' }}{{ Math.abs(enhanced.year_growth * 100).toFixed(1) }}%
+            </text>
+            <text>较去年同期</text>
+          </view>
+        </view>
+        <view class="hero-edit" @click="goSettings">
+          <text>自定义</text>
+        </view>
+      </view>
+
+      <!-- 指标网格 -->
+      <view class="m-metric-grid">
+        <view
+          v-for="(key, idx) in selectedMetrics"
+          :key="key"
+          class="m-metric-item"
+          :class="{ 'metric-item--main': idx === 0 }"
+        >
+          <view class="m-metric-label">{{ getMetricDef(key)?.name }}</view>
+          <view class="m-metric-value" :class="valueColorClass(key, enhanced[key])">
+            {{ formatMetricValue(getMetricDef(key), enhanced[key]) }}
+          </view>
         </view>
       </view>
     </view>
 
-    <!-- 最近到账 -->
-    <view class="section-title">
-      最近到账
-      <text class="more" @click="goDividends">全部 ›</text>
-    </view>
-    <view class="card list-card">
-      <view v-if="!recent.length" class="empty">还没有分红记录</view>
-      <view v-for="d in recent" :key="d.id" class="div-row" @click="goHolding(d.holding_id)">
-        <view class="div-main">
-          <view class="div-name">{{ d.holding_name }}</view>
-          <view class="div-sub">{{ fmtDate(d.pay_date) }} 派息</view>
+    <!-- ========== 分红趋势 ========== -->
+    <view class="m-section-title">分红趋势 · 近 12 个月</view>
+    <view class="m-chart-card">
+      <view class="m-bar-chart">
+        <view class="m-bar-col" v-for="(m, i) in trend.months" :key="i">
+          <view class="m-bar-wrap">
+            <view class="m-bar" :style="{ height: barHeight(trend.amounts_cny[i]) + 'rpx' }"></view>
+          </view>
+          <view class="m-bar-label">{{ m.slice(5) }}</view>
         </view>
-        <view class="div-amt text-emerald">+{{ sym(d.currency) }}{{ fmt(d.net_amount) }}</view>
+      </view>
+    </view>
+
+    <!-- ========== 持仓快照 ========== -->
+    <view class="m-section-title">持仓快照</view>
+    <view class="m-snapshot-card">
+      <view class="m-snapshot-row">
+        <text class="label">持仓只数</text>
+        <text class="value">{{ enhanced.holding_count || 0 }} 只</text>
+      </view>
+      <view class="m-snapshot-row">
+        <text class="label">累计收息</text>
+        <text class="value">¥{{ fmt(enhanced.total_received_cny) }}</text>
+      </view>
+      <view class="m-snapshot-row">
+        <text class="label">总市值</text>
+        <text class="value">{{ enhanced.market_value_cny > 0 ? '¥' + fmt(enhanced.market_value_cny) : '—' }}</text>
+      </view>
+      <view class="m-snapshot-row">
+        <text class="label">浮动盈亏</text>
+        <text class="value" :class="pnlClass(enhanced.floating_pnl_cny)">
+          {{ enhanced.market_value_cny > 0 ? (enhanced.floating_pnl_cny >= 0 ? '+' : '') + '¥' + fmt(enhanced.floating_pnl_cny) : '—' }}
+        </text>
+      </view>
+      <view class="m-snapshot-row">
+        <text class="label">净投入</text>
+        <text class="value">¥{{ fmt(enhanced.net_investment_cny) }}</text>
       </view>
     </view>
 
@@ -64,148 +88,245 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
-import { apiSummary, apiMonthlyTrend, apiDividends, apiHoldings } from '@/api'
-import { currencyMap, marketMap, MARKETS } from '@/utils/constants'
+import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend } from '@/api'
 // #ifdef H5
 import WebLayout from '@/components/WebLayout.vue'
 // #endif
 
-const summary = ref({})
+// ---------- 数据 ----------
+const enhanced = ref({})
+const registry = ref([])
+const selectedMetrics = ref([])
 const trend = ref({ months: [], amounts_cny: [] })
-const recent = ref([])
-const holdings = ref([])
 
-const year = new Date().getFullYear()
+// ---------- 计算属性 ----------
+const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year_cny')
+const mainMetric = computed(() => getMetricDef(mainMetricKey.value))
+const mainMetricName = computed(() => mainMetric.value?.name || '预测年度分红')
 
-const growthText = computed(() => {
-  const g = summary.value.year_growth
-  if (g === null || g === undefined) return '暂无同比'
-  return (g >= 0 ? '↑ ' : '↓ ') + (Math.abs(g) * 100).toFixed(1) + '%'
-})
-const growthClass = computed(() => {
-  const g = summary.value.year_growth
-  if (g === null || g === undefined) return 'text-muted'
-  return g >= 0 ? 'text-emerald' : 'text-amber'
-})
-
-const marketFoot = computed(() => {
-  if (!holdings.value.length) return '暂无持仓'
-  const counts = {}
-  holdings.value.forEach(h => {
-    const lbl = marketMap[h.market]?.label
-    if (lbl) counts[lbl] = (counts[lbl] || 0) + 1
-  })
-  // 按市场字典顺序输出，仅保留有持仓的市场
-  const parts = MARKETS
-    .map(m => marketMap[m.value]?.label)
-    .filter(lbl => lbl && counts[lbl])
-    .map(lbl => `${lbl}${counts[lbl]}`)
-  return parts.length ? parts.join('·') : '暂无持仓'
-})
-
-function fmt(n) {
-  return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// ---------- 指标工具 ----------
+function getMetricDef(key) {
+  return registry.value.find(m => m.key === key)
 }
-function sym(c) { return currencyMap[c]?.symbol || '' }
-function fmtDate(d) { return d ? String(d).slice(5) : '' }
+
+function fmt(n, digits = 2) {
+  return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })
+}
+
+function formatMetricValue(def, val) {
+  if (val === null || val === undefined || val === 0) return '—'
+  if (!def) return fmt(val)
+  switch (def.format) {
+    case 'currency': return '¥' + fmt(val)
+    case 'percent': return (val * 100).toFixed(2) + '%'
+    case 'number': return val + ' 只'
+    default: return fmt(val)
+  }
+}
+
+function valueColorClass(key, val) {
+  if (val === null || val === undefined || val === 0) return ''
+  if (key === 'floating_pnl_cny' || key === 'pnl_rate') {
+    return val >= 0 ? 'positive' : 'negative'
+  }
+  return ''
+}
+
+function pnlClass(val) {
+  if (val === null || val === undefined || val === 0) return ''
+  return val >= 0 ? 'positive' : 'negative'
+}
 
 function barHeight(v) {
   const max = Math.max(...(trend.value.amounts_cny || [0]), 1)
   return Math.max(6, Math.round((v / max) * 200))
 }
 
+// ---------- 页面跳转 ----------
+function goSettings() {
+  uni.navigateTo({ url: '/pages/index/metrics' })
+}
+
+// ---------- 加载 ----------
 async function load() {
   try {
-    const [s, t, list, h] = await Promise.all([
-      apiSummary(),
+    const [enh, fm, t] = await Promise.all([
+      apiEnhancedSummary(),
+      apiDashboardMetrics(),
       apiMonthlyTrend('12m'),
-      apiDividends({ status: 'confirmed', page: 1, page_size: 3 }),
-      apiHoldings(),
     ])
-    summary.value = s
+    enhanced.value = enh
+    registry.value = fm.registry
+    selectedMetrics.value = fm.selected
     trend.value = t
-    recent.value = list.items || []
-    holdings.value = h.items || []
   } catch (e) { /* toast 已统一处理 */ }
 }
 
 onShow(load)
-
-function goDividends() { uni.navigateTo({ url: '/pages/dividends/list' }) }
-function goHolding(id) { uni.navigateTo({ url: '/pages/holdings/detail?id=' + id }) }
 </script>
 
 <style scoped>
 .page { padding-bottom: 30rpx; }
 
-/* 2×2 指标卡 */
-.stat-grid {
+/* ========== 深色主卡 ========== */
+.hero-card {
+  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  border-radius: 20rpx;
+  padding: 32rpx 28rpx;
+  color: #fff;
+  margin: 16rpx;
+  position: relative;
+  overflow: hidden;
+}
+.hero-card::before {
+  content: '';
+  position: absolute;
+  top: -30%; right: -20%;
+  width: 250px; height: 250px;
+  background: radial-gradient(circle, rgba(255,165,0,0.15) 0%, transparent 70%);
+  border-radius: 50%;
+  pointer-events: none;
+}
+.hero-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 24rpx;
+  position: relative;
+  z-index: 1;
+}
+.hero-label {
+  font-size: 24rpx;
+  color: rgba(255,255,255,0.5);
+  letter-spacing: 4rpx;
+}
+.hero-value {
+  font-size: 72rpx;
+  font-weight: 700;
+  letter-spacing: 2rpx;
+  margin-top: 8rpx;
+}
+.hero-currency {
+  font-size: 30rpx;
+  font-weight: 400;
+  margin-right: 6rpx;
+  opacity: 0.7;
+}
+.hero-sub {
+  font-size: 24rpx;
+  color: rgba(255,255,255,0.5);
+  margin-top: 6rpx;
+}
+.hero-sub .up { color: #4ade80; margin-right: 6rpx; }
+.hero-sub .down { color: #f87171; margin-right: 6rpx; }
+
+.hero-edit {
+  font-size: 22rpx;
+  color: rgba(255,255,255,0.6);
+  padding: 8rpx 20rpx;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 12rpx;
+  z-index: 1;
+}
+
+/* 指标网格 */
+.m-metric-grid {
   display: flex;
   flex-wrap: wrap;
-  padding: 24rpx 24rpx 0;
+  position: relative;
+  z-index: 1;
 }
-.stat-card {
-  width: calc(50% - 16rpx);
-  margin: 8rpx;
-  background: #fff;
-  border-radius: 24rpx;
-  padding: 28rpx 26rpx;
-  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.06);
+.m-metric-item {
+  width: 33.33%;
+  padding: 20rpx 16rpx;
+  border-top: 1px solid rgba(255,255,255,0.1);
   box-sizing: border-box;
 }
-.stat-label { font-size: 22rpx; color: #94a3b8; }
-.stat-value {
-  font-size: 36rpx;
-  font-weight: 700;
-  color: #1e293b;
-  margin: 12rpx 0 8rpx;
+/* 同一行内非首列加左边框 */
+.m-metric-item:not(:nth-child(3n+1)):not(:first-child) {
+  border-left: 1px solid rgba(255,255,255,0.06);
 }
-.stat-foot { font-size: 20rpx; }
+.m-metric-label {
+  font-size: 22rpx;
+  color: rgba(255,255,255,0.5);
+  margin-bottom: 6rpx;
+}
+.m-metric-value {
+  font-size: 34rpx;
+  font-weight: 600;
+  color: #fff;
+}
+.m-metric-value.positive { color: #4ade80; }
+.m-metric-value.negative { color: #f87171; }
 
-/* 分红趋势柱状 */
-.trend-card { padding: 32rpx 28rpx 24rpx; }
-.bars { display: flex; align-items: flex-end; height: 260rpx; }
-.bar-col {
+/* ========== 通用区块标题 ========== */
+.m-section-title {
+  font-size: 28rpx;
+  font-weight: 600;
+  margin: 28rpx 32rpx 16rpx;
+  color: #1a1a1a;
+}
+
+/* ========== 分红趋势 ========== */
+.m-chart-card {
+  background: #fff;
+  border-radius: 16rpx;
+  padding: 24rpx 16rpx;
+  margin: 0 16rpx;
+  border: 1px solid #eee;
+}
+.m-bar-chart {
+  display: flex;
+  align-items: flex-end;
+  height: 260rpx;
+  gap: 4rpx;
+}
+.m-bar-col {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
 }
-.bar-wrap {
+.m-bar-wrap {
   height: 220rpx;
   display: flex;
   align-items: flex-end;
   width: 100%;
   justify-content: center;
 }
-.bar {
-  width: 28rpx;
-  background: rgba(30, 58, 138, 0.8);
-  border-radius: 8rpx 8rpx 0 0;
-  min-height: 6rpx;
+.m-bar {
+  width: 18rpx;
+  background: linear-gradient(180deg, #1e3a8a 0%, #3b82f6 100%);
+  border-radius: 4rpx 4rpx 0 0;
+  min-height: 4rpx;
 }
-.bar-label { font-size: 20rpx; color: #94a3b8; margin-top: 12rpx; }
+.m-bar-label { font-size: 18rpx; color: #94a3b8; margin-top: 8rpx; }
 
-/* 最近到账列表 */
-.more { font-size: 24rpx; color: #1e3a8a; font-weight: 400; }
-.list-card { padding: 8rpx 28rpx; }
-.div-row {
-  display: flex;
-  align-items: center;
-  padding: 26rpx 0;
-  border-bottom: 1rpx solid #f1f5f9;
+/* ========== 持仓快照 ========== */
+.m-snapshot-card {
+  background: #fff;
+  border-radius: 16rpx;
+  margin: 0 16rpx;
+  border: 1px solid #eee;
+  overflow: hidden;
 }
-.div-row:last-child { border-bottom: none; }
-.div-main { flex: 1; min-width: 0; }
-.div-name { font-size: 28rpx; font-weight: 500; color: #1e293b; }
-.div-sub { font-size: 22rpx; color: #94a3b8; margin-top: 8rpx; }
-.div-amt { font-size: 28rpx; flex-shrink: 0; margin-left: 16rpx; }
+.m-snapshot-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24rpx 28rpx;
+  border-bottom: 1px solid #f5f5f5;
+  font-size: 26rpx;
+}
+.m-snapshot-row:last-child { border-bottom: none; }
+.m-snapshot-row .label { color: #999; }
+.m-snapshot-row .value { font-weight: 500; color: #333; }
+.m-snapshot-row .value.positive { color: #16a34a; }
+.m-snapshot-row .value.negative { color: #dc2626; }
 
 /* #ifdef H5 */
 @media (min-width: 768px) {
   .page { padding: 32rpx 48rpx 60rpx; max-width: 900px; margin: 0 auto; }
-  .stat-grid { padding: 0; }
-  .stat-card { width: calc(25% - 16rpx); }
 }
 /* #endif */
 </style>

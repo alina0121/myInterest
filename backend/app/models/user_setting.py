@@ -15,4 +15,5 @@ class UserSetting(SQLModel, table=True):
     auto_match_schedule: int = 1   # 预案发布后自动生成分红(待到账)（1=开）
     push_enabled: int = 1          # App 推送开关（1=开 / 0=关）
     wx_subscribe: int = 0          # 小程序订阅消息是否已授权（1=是）
+    dashboard_metrics: Optional[str] = None  # 首页指标偏好（JSON 数组，存 key 列表）
     updated_at: str = Field(default_factory=now_str)  # 更新时间

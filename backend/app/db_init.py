@@ -22,7 +22,7 @@ TAX_RULE_SEEDS = [
     ("bond", "债券利息", 0.00, None, None, "个人投资者暂免征收"),
 ]
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def _table_columns(session: Session, table: str) -> set[str]:
@@ -97,6 +97,18 @@ def migrate_crawl_enabled(session: Session) -> None:
         log.info("added column crawl_enabled to securities")
 
 
+def migrate_dashboard_metrics(session: Session) -> None:
+    """v6：user_settings 表新增 dashboard_metrics 字段（首页指标偏好 JSON）。
+
+    新库 create_all 已带该列；旧库用 ALTER TABLE 补列，默认 NULL。
+    幂等：列已存在即跳过。
+    """
+    if "dashboard_metrics" not in _table_columns(session, "user_settings"):
+        session.exec(text("ALTER TABLE user_settings ADD COLUMN dashboard_metrics TEXT"))
+        session.commit()
+        log.info("added column dashboard_metrics to user_settings")
+
+
 def create_indexes(session: Session) -> None:
     """SQLModel 无法表达的部分唯一索引（docs/02 §6 已发布预案防重）。"""
     session.exec(text(
@@ -139,6 +151,8 @@ def init_db(seed_fx: bool = True) -> None:
         drop_legacy_schedule_columns(session)
         # v5：securities 加 crawl_enabled 列（爬虫白名单）
         migrate_crawl_enabled(session)
+        # v6：user_settings 加 dashboard_metrics 列（首页指标偏好）
+        migrate_dashboard_metrics(session)
         # 升级库：按已有分红历史回填 securities.freq（新库为空，立即返回）
         from .services import security_service
         security_service.refresh_all_freq(session)

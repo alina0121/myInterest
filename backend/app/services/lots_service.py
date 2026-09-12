@@ -42,6 +42,35 @@ def cost_total(lots: list[Lot]) -> float:
     return r2(sum((l.shares * l.price + l.fee) for l in lots if l.direction == "buy"))
 
 
+def cost_basis(lots: list[Lot]) -> float:
+    """当前持仓的加权平均成本（加权平均法）。
+
+    与 cost_total 的区别：卖出时按比例冲减成本，反映当前实际持仓的成本。
+    - 买入：成本 += shares × price + fee，股数 += shares
+    - 卖出：成本 -= (成本/股数) × 卖出股数，股数 -= 卖出股数
+    - 送股：股数 += shares，成本不变（摊薄每股成本）
+
+    用于浮动盈亏、总成本展示、avg_cost 计算。
+    """
+    total_cost = Decimal("0")
+    total_shares = Decimal("0")
+    for l in sorted(lots, key=lambda x: (x.trade_date, x.id)):
+        shares = Decimal(str(l.shares))
+        price = Decimal(str(l.price))
+        fee = Decimal(str(l.fee or 0))
+        if l.direction == "buy":
+            total_cost += shares * price + fee
+            total_shares += shares
+        elif l.direction == "bonus_share":
+            total_shares += shares
+        elif l.direction == "sell":
+            if total_shares > 0:
+                avg = total_cost / total_shares
+                total_cost -= avg * shares
+            total_shares -= shares
+    return r2(total_cost)
+
+
 def validate_sell(session: Session, holding_id: int, direction: str,
                   shares: float, exclude_lot_id: int | None = None) -> None:
     """卖出后净持仓不得为负（docs/03 §1.3）。"""
@@ -56,7 +85,7 @@ def computed_summary(session: Session, h: Holding) -> dict:
     """持仓列表/详情的计算字段（docs/04 §2.1）。"""
     lots = get_lots(session, h.id)
     now = shares_now(lots)
-    cost = cost_total(lots)
+    cost = cost_basis(lots)   # 当前持仓的加权平均成本（卖出按比例冲减）
     avg = r4(cost / now) if now > 0 else 0.0
 
     divs = list(session.exec(
