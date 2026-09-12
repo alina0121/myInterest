@@ -53,6 +53,7 @@ const menus = [
   { path: '/admin/schedules', label: '分红预案审核', icon: '📋' },
   { path: '/admin/securities', label: '证券与白名单', icon: '🏷️' },
   { path: '/admin/users', label: '用户管理', icon: '👥' },
+  { path: '/admin/login-methods', label: '系统参数配置', icon: '🔐' },
   { path: '/admin/config', label: '汇率与税率', icon: '💱' },
   { path: '/admin/notice', label: '公告与反馈', icon: '📢' },
   { path: '/admin/logs', label: '操作日志', icon: '📝' },

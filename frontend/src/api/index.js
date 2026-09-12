@@ -9,6 +9,17 @@ export const apiWxLogin = (code, nickname, avatar) =>
   post('/api/auth/wx-login', { code, nickname, avatar }, { auth: false })
 export const apiMe = () => get('/api/auth/me')
 export const apiLogout = () => post('/api/auth/logout')
+// 邮箱验证码相关
+export const apiSendCode = (channel, target, purpose) =>
+  post('/api/auth/send-code', { channel, target, purpose }, { auth: false })
+export const apiEmailLogin = (email, code) =>
+  post('/api/auth/email-login', { email, code }, { auth: false })
+export const apiEmailRegister = (payload) =>
+  post('/api/auth/email-register', payload, { auth: false })
+export const apiResetPassword = (email, code, newPassword) =>
+  post('/api/auth/reset-password', { email, code, new_password: newPassword }, { auth: false })
+export const apiBindEmail = (email, code) =>
+  post('/api/auth/bind-email', { email, code })
 
 // ---------- 持仓 ----------
 export const apiHoldings = (params = {}) => get('/api/holdings', params)
@@ -38,16 +49,16 @@ export const apiDeleteDividend = (id) => del(`/api/dividends/${id}`)
 
 // ---------- 统计 / 日历 / 设置 ----------
 export const apiSummary = () => get('/api/stats/summary')
-export const apiEnhancedSummary = () => get('/api/stats/enhanced-summary')
+export const apiEnhancedSummary = (params = {}) => get('/api/stats/enhanced-summary', params)
 export const apiDashboardMetrics = () => get('/api/stats/dashboard-metrics')
 export const apiSaveDashboardMetrics = (selected) => put('/api/stats/dashboard-metrics', { selected })
-export const apiMonthlyTrend = (range = '12m') => get('/api/stats/monthly-trend', { range })
-export const apiByMarket = () => get('/api/stats/by-market')
-export const apiForecast = () => get('/api/stats/forecast')
-export const apiTopHoldings = (limit = 10) => get('/api/stats/top-holdings', { limit })
-export const apiYieldRanking = () => get('/api/stats/yield-ranking')
+export const apiMonthlyTrend = (range = '12m', params = {}) => get('/api/stats/monthly-trend', { range, ...params })
+export const apiByMarket = (params = {}) => get('/api/stats/by-market', params)
+export const apiForecast = (params = {}) => get('/api/stats/forecast', params)
+export const apiTopHoldings = (limit = 10, params = {}) => get('/api/stats/top-holdings', { limit, ...params })
+export const apiYieldRanking = (params = {}) => get('/api/stats/yield-ranking', params)
 export const apiHoldingStats = (id) => get(`/api/stats/holdings/${id}`)
-export const apiCalendar = (year, month) => get('/api/calendar', { year, month })
+export const apiCalendar = (year, month, params = {}) => get('/api/calendar', { year, month, ...params })
 
 // ---------- 预案（用户端） ----------
 export const apiUpcoming = () => get('/api/schedules/upcoming')
@@ -64,3 +75,7 @@ export const apiCreateFeedback = (content) => post('/api/feedback', { content })
 export const apiSettings = () => get('/api/settings')
 export const apiSaveSettings = (payload) => put('/api/settings', payload)
 export const apiRates = (date) => get('/api/rates', date ? { date } : {})
+
+// ---------- 账户管理 ----------
+export const apiAccounts = () => get('/api/accounts')
+export const apiAccountsMeta = (accounts_meta) => put('/api/accounts/meta', { accounts_meta })

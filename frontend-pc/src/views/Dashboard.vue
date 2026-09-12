@@ -6,7 +6,7 @@
         <div>
           <div class="hero-label">{{ mainMetricName }}</div>
           <div class="hero-value">
-            <span v-if="mainMetric?.format === 'currency'" class="hero-currency">¥</span>
+            <span v-if="mainMetric?.format === 'currency'" class="hero-currency">{{ curSymbol }}</span>
             {{ formatMetricValue(mainMetric, enhanced[mainMetricKey]) }}
           </div>
           <div class="hero-sub" v-if="enhanced.year_growth !== null && enhanced.year_growth !== undefined">
@@ -17,12 +17,33 @@
             较去年同期
           </div>
         </div>
-        <div class="hero-edit" @click="showSettings = true">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-          自定义指标
+        <div class="hero-actions">
+          <!-- 币种切换：仅总览看板生效，聚合多币种持仓统一折算 -->
+          <el-dropdown trigger="click" @command="onCurrencyChange">
+            <div class="hero-edit">
+              <span class="cur-symbol">{{ curSymbol }}</span>
+              <span>{{ curLabel }}</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </div>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-for="c in currencyOptions" :key="c.value"
+                                  :command="c.value"
+                                  :class="{ 'is-active': userStore.displayCurrency === c.value }">
+                  {{ c.label }}
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
+          <div class="hero-edit" @click="showSettings = true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            自定义指标
+          </div>
         </div>
       </div>
 
@@ -62,16 +83,16 @@
           </div>
           <div class="info-row">
             <span class="label">累计收息</span>
-            <span class="value">¥{{ fmt(enhanced.total_received_cny) }}</span>
+            <span class="value">{{ fmtDisplay(enhanced.total_received, enhanced.display_currency) }}</span>
           </div>
           <div class="info-row">
             <span class="label">总市值</span>
-            <span class="value">{{ enhanced.market_value_cny > 0 ? '¥' + fmt(enhanced.market_value_cny) : '—' }}</span>
+            <span class="value">{{ enhanced.market_value > 0 ? fmtDisplay(enhanced.market_value, enhanced.display_currency) : '—' }}</span>
           </div>
           <div class="info-row">
             <span class="label">浮动盈亏</span>
-            <span class="value" :class="pnlClass(enhanced.floating_pnl_cny)">
-              {{ enhanced.market_value_cny > 0 ? (enhanced.floating_pnl_cny >= 0 ? '+' : '') + '¥' + fmt(enhanced.floating_pnl_cny) : '—' }}
+            <span class="value" :class="pnlClass(enhanced.floating_pnl)">
+              {{ enhanced.market_value > 0 ? (enhanced.floating_pnl >= 0 ? '+' : '-') + fmtDisplay(Math.abs(enhanced.floating_pnl), enhanced.display_currency) : '—' }}
             </span>
           </div>
           <div class="info-row">
@@ -82,7 +103,7 @@
           </div>
           <div class="info-row">
             <span class="label">净投入</span>
-            <span class="value">¥{{ fmt(enhanced.net_investment_cny) }}</span>
+            <span class="value">{{ fmtDisplay(enhanced.net_investment, enhanced.display_currency) }}</span>
           </div>
         </div>
       </div>
@@ -173,10 +194,13 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
   apiEnhancedSummary, apiDashboardMetrics, apiSaveDashboardMetrics,
-  apiMonthlyTrend, apiByMarket, apiDividends, apiUpcoming,
+  apiMonthlyTrend, apiByMarket, apiDividends, apiUpcoming, apiSaveSettings,
 } from '../api'
-import { fmt, fmtCNY, currencyMap, marketMap } from '../utils/constants'
+import { fmt, fmtDisplay, currencyMap, marketMap } from '../utils/constants'
 import { useEchart } from '../utils/echart'
+import { useUserStore } from '../store/user'
+
+const userStore = useUserStore()
 
 // ---------- 数据 ----------
 const enhanced = ref({})
@@ -198,7 +222,30 @@ const tr = useEchart(trendEl, trendOpt)
 const mk = useEchart(marketEl, marketOpt)
 
 // ---------- 计算属性 ----------
-const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year_cny')
+// v8：当前显示币种符号（¥ / $ / HK$），跟随 userStore.displayCurrency
+const curSymbol = computed(() => {
+  const c = currencyMap[userStore.displayCurrency]
+  return c?.symbol || '¥'
+})
+// 币种切换下拉的标签
+const curLabel = computed(() => {
+  const labels = { CNY: '人民币', USD: '美元', HKD: '港币', ORIGINAL: '本币' }
+  return labels[userStore.displayCurrency] || '人民币'
+})
+// 币种选项（仅总览看板用，其他页按原币种显示）
+const currencyOptions = [
+  { value: 'CNY', label: '¥ 人民币（统一折算）' },
+  { value: 'USD', label: '$ 美元' },
+  { value: 'HKD', label: 'HK$ 港币' },
+  { value: 'ORIGINAL', label: '本币（按原币种）' },
+]
+// 切换币种后重新加载数据（仅总览看板生效，持久化到后端）
+async function onCurrencyChange(cur) {
+  userStore.setDisplayCurrency(cur)
+  try { await apiSaveSettings({ display_currency: cur }) } catch (e) { /* 静默 */ }
+  await loadAll()
+}
+const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year')
 const mainMetric = computed(() => getMetricDef(mainMetricKey.value))
 const mainMetricName = computed(() => mainMetric.value?.name || '预测年度分红')
 
@@ -216,8 +263,10 @@ function getMetricDef(key) {
 function formatMetricValue(def, val) {
   if (val === null || val === undefined || val === 0) return '—'
   if (!def) return fmt(val)
+  // v8：货币类按当前显示币种带符号
+  const dispCur = enhanced.value.display_currency || 'CNY'
   switch (def.format) {
-    case 'currency': return '¥' + fmt(val)
+    case 'currency': return fmtDisplay(val, dispCur)
     case 'percent': return (val * 100).toFixed(2) + '%'
     case 'number': return val + ' 只'
     default: return fmt(val)
@@ -226,8 +275,8 @@ function formatMetricValue(def, val) {
 
 function valueColorClass(key, val) {
   if (val === null || val === undefined || val === 0) return ''
-  // 盈亏类：正值绿色，负值红色
-  if (key === 'floating_pnl_cny' || key === 'pnl_rate') {
+  // 盈亏类：正值绿色，负值红色（字段名已去掉 _cny 后缀）
+  if (key === 'floating_pnl' || key === 'pnl_rate') {
     return val >= 0 ? 'positive' : 'negative'
   }
   return ''
@@ -268,14 +317,23 @@ async function saveMetrics() {
 
 // ---------- 图表 ----------
 async function loadTrend() {
-  const t = await apiMonthlyTrend(trendRange.value)
+  // v8：账户跟随 + 显示币种转换
+  const params = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    params.account = userStore.currentAccount
+  }
+  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
+    params.display_currency = userStore.displayCurrency
+  }
+  const t = await apiMonthlyTrend(trendRange.value, params)
+  // v8：后端统一返回固定字段 amounts，附带 display_currency 标识
   trendOpt.value = {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', valueFormatter: (v) => fmtDisplay(v, t.display_currency || 'CNY') },
     grid: { left: 60, right: 20, top: 20, bottom: 30 },
     xAxis: { type: 'category', data: t.months, axisLabel: { fontSize: 11 } },
     yAxis: { type: 'value', axisLabel: { fontSize: 11 } },
     series: [{
-      type: 'bar', data: t.amounts_cny, barMaxWidth: 28,
+      type: 'bar', data: t.amounts || [], barMaxWidth: 28,
       itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
     }],
   }
@@ -298,15 +356,18 @@ function renderForecast(f) {
 }
 
 function renderMarket(items) {
+  // v8：后端统一返回固定字段 amount，用 display_currency 决定符号
+  const dispCur = enhanced.value.display_currency || 'CNY'
+  const sym = currencyMap[dispCur]?.symbol || '¥'
   marketOpt.value = {
-    tooltip: { trigger: 'item', formatter: '{b}: ¥{c} ({d}%)' },
+    tooltip: { trigger: 'item', formatter: `{b}: ${sym}{c} ({d}%)` },
     legend: { bottom: 0 },
     series: [{
       type: 'pie', radius: ['45%', '70%'], center: ['50%', '45%'],
       label: { formatter: '{b}\n{d}%' },
       data: items.map((m) => ({
         name: marketMap[m.market]?.label || m.market,
-        value: Number(m.amount_cny),
+        value: Number(m.amount),
       })),
     }],
   }
@@ -314,11 +375,19 @@ function renderMarket(items) {
 }
 
 // ---------- 加载 ----------
-onMounted(async () => {
-  const [enh, fm, mk, tr] = await Promise.all([
-    apiEnhancedSummary(),
+// v8：币种转换仅在总览看板生效，其他页按原币种显示
+async function loadAll() {
+  const params = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    params.account = userStore.currentAccount
+  }
+  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
+    params.display_currency = userStore.displayCurrency
+  }
+  const [enh, fm, mkData] = await Promise.all([
+    apiEnhancedSummary(params),
     apiDashboardMetrics(),
-    apiByMarket(),
+    apiByMarket(params),
     loadTrend(),
   ])
   enhanced.value = enh
@@ -327,8 +396,10 @@ onMounted(async () => {
   maxSelect.value = fm.max_select
 
   renderForecast(enh)
-  renderMarket(mk.items || [])
-})
+  renderMarket(mkData.items || [])
+}
+
+onMounted(() => loadAll())
 
 onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
 </script>
@@ -398,10 +469,22 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
   transition: all 0.2s;
   z-index: 1;
   white-space: nowrap;
+  outline: none;
 }
 .hero-edit:hover {
   background: rgba(255,255,255,0.1);
   color: #fff;
+}
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  z-index: 1;
+}
+.cur-symbol {
+  font-size: 15px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
 }
 
 /* 指标网格：自适应 3~4 列 */

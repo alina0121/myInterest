@@ -654,6 +654,21 @@ def admin_reset_config(key: str, request: Request,
     return ok({"groups": config_service.admin_view()})
 
 
+@router.post("/test-mail")
+def admin_test_mail(body: dict, request: Request,
+                    session: Session = Depends(get_session),
+                    admin: User = Depends(require_super_admin)):
+    """测试发信：用当前 SMTP 配置给指定邮箱发一封测试信。super_admin only。"""
+    from ..schemas import TestMailIn
+    from ..services import mail_service
+    payload = TestMailIn(**body)
+    success, message = mail_service.send_test(payload.to)
+    _log(session, admin, request, "test_mail", "mail", None,
+         {"to": payload.to, "success": success})
+    session.commit()
+    return ok({"success": success, "message": message})
+
+
 # ---------- 11.5 公告 ----------
 def _announcement_out(a: Announcement) -> dict:
     return {"id": a.id, "title": a.title, "content": a.content,

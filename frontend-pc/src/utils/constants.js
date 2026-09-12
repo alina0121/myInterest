@@ -8,14 +8,15 @@ export const MARKETS = [
 
 export const marketMap = Object.fromEntries(MARKETS.map((m) => [m.value, m]))
 
-export const CURRENCIES = {
-  CNY: { symbol: '¥', label: '人民币' },
-  USD: { symbol: '$', label: '美元' },
-  HKD: { symbol: 'HK$', label: '港币' },
-}
+/** 币种字典：数组形式（便于 settings/currency 页面 v-for 渲染） */
+export const CURRENCIES = [
+  { value: 'CNY', label: '人民币 ¥', symbol: '¥' },
+  { value: 'USD', label: '美元 $', symbol: '$' },
+  { value: 'HKD', label: '港币 HK$', symbol: 'HK$' },
+]
 
 export const currencyMap = Object.fromEntries(
-  Object.entries(CURRENCIES).map(([k, v]) => [k, v]),
+  CURRENCIES.map((c) => [c.value, c]),
 )
 
 export const FREQS = [
@@ -38,4 +39,27 @@ export function fmt(n, digits = 2) {
 
 export function fmtCNY(n) {
   return '¥ ' + fmt(n)
+}
+
+/** v8：按显示币种带符号格式化金额
+ * displayCurrency: 'CNY' / 'USD' / 'HKD' / 'ORIGINAL'
+ * ORIGINAL 模式：金额是各市场原币种，需传 originalCurrency 决定符号
+ * （聚合统计页后端已把 ORIGINAL 回落 CNY，所以只有单条分红/单持仓详情会走 ORIGINAL 分支）
+ */
+export function fmtDisplay(n, displayCurrency = 'CNY', originalCurrency = null) {
+  if (n === null || n === undefined) return '—'
+  const symbols = { CNY: '¥', USD: '$', HKD: 'HK$' }
+  // ORIGINAL 模式：用单条记录的原币种符号
+  if (displayCurrency === 'ORIGINAL' && originalCurrency) {
+    return (symbols[originalCurrency] || '¥') + fmt(n)
+  }
+  const sym = symbols[displayCurrency] || '¥'
+  return sym + fmt(n)
+}
+
+/** 按币种带符号格式化金额 */
+export function moneyWith(currency, n) {
+  const c = currencyMap[currency]
+  if (!c) return fmt(n)
+  return `${c.symbol}${fmt(n)}`
 }

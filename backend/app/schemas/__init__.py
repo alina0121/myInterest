@@ -37,6 +37,46 @@ class WxLoginIn(BaseModel):
     avatar: Optional[str] = None
 
 
+# ---------- auth：邮箱验证码相关 ----------
+class SendCodeIn(BaseModel):
+    """发送验证码：channel=email/sms，target=邮箱/手机号，purpose=login/register/reset/bind"""
+    channel: Literal["email", "sms"]
+    target: str = Field(min_length=4, max_length=64)
+    purpose: Literal["login", "register", "reset", "bind"]
+
+
+class EmailLoginIn(BaseModel):
+    """邮箱验证码登录：邮箱 + 验证码"""
+    email: str = Field(min_length=4)
+    code: str = Field(min_length=4, max_length=8)
+
+
+class EmailRegisterIn(BaseModel):
+    """邮箱验证码注册：邮箱 + 验证码 + 可选昵称/密码"""
+    email: str = Field(min_length=4)
+    code: str = Field(min_length=4, max_length=8)
+    nickname: Optional[str] = Field(default=None, max_length=32)
+    password: Optional[str] = Field(default=None, min_length=8)
+
+
+class ResetPasswordIn(BaseModel):
+    """找回密码：邮箱 + 验证码 + 新密码"""
+    email: str = Field(min_length=4)
+    code: str = Field(min_length=4, max_length=8)
+    new_password: str = Field(min_length=8)
+
+
+class BindEmailIn(BaseModel):
+    """绑定邮箱（已登录用户）：邮箱 + 验证码"""
+    email: str = Field(min_length=4)
+    code: str = Field(min_length=4, max_length=8)
+
+
+class TestMailIn(BaseModel):
+    """后台测试发信：收件邮箱"""
+    to: str = Field(min_length=4)
+
+
 # ---------- holdings ----------
 class FirstLotIn(BaseModel):
     trade_date: Date
@@ -150,6 +190,9 @@ class SettingsUpdate(BaseModel):
     auto_match_schedule: Optional[int] = Field(default=None, ge=0, le=1)
     push_enabled: Optional[int] = Field(default=None, ge=0, le=1)
     wx_subscribe: Optional[int] = Field(default=None, ge=0, le=1)
+    # v8：账户元数据与可见币种（JSON 数组字符串，由前端序列化）
+    accounts_meta: Optional[str] = None
+    visible_currencies: Optional[str] = None
 
 
 # ---------- schedules（预案，docs/04 §5.3/11.3）----------

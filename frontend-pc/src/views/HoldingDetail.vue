@@ -43,10 +43,10 @@
         <div class="hs-item"><div class="text-muted">当前持仓</div><div class="hs-val">{{ fmt(h.shares_now) }}</div></div>
         <div class="hs-item"><div class="text-muted">平均成本</div><div class="hs-val">{{ sym(h.currency) }}{{ fmt(h.avg_cost, 4) }}</div></div>
         <div class="hs-item"><div class="text-muted">总投入</div><div class="hs-val">{{ sym(h.currency) }}{{ fmt(h.cost_total) }}</div></div>
-        <div class="hs-item"><div class="text-muted">本年分红</div><div class="hs-val text-emerald">{{ fmtCNY(h.year_dividend_cny ?? h.year_dividend) }}</div></div>
+        <div class="hs-item"><div class="text-muted">本年分红</div><div class="hs-val text-emerald">{{ sym(h.currency) }}{{ fmt(h.year_dividend) }}</div></div>
         <div class="hs-item">
           <div class="text-muted">累计分红</div>
-          <div class="hs-val text-emerald">{{ fmtCNY(st.total_net_cny ?? h.total_dividend) }}</div>
+          <div class="hs-val text-emerald">{{ fmtDisplay(st.total_net, st.display_currency, h.currency) }}</div>
           <div class="yoc-badge">TTM成本 {{ ((st.yoc_ttm ?? h.yoc_ttm) * 100).toFixed(2) }}%</div>
         </div>
       </div>
@@ -78,7 +78,7 @@
               <template #default="{ row }">{{ sym(h.currency) }}{{ fmt(row.amount) }}</template>
             </el-table-column>
             <el-table-column label="累计分红" width="120" align="right">
-              <template #default="{ row }"><span class="text-emerald">{{ fmtCNY(row.lot_dividend) }}</span></template>
+              <template #default="{ row }"><span class="text-emerald">{{ sym(h.currency) }}{{ fmt(row.lot_dividend) }}</span></template>
             </el-table-column>
             <el-table-column prop="note" label="备注" min-width="120" show-overflow-tooltip />
             <el-table-column label="操作" width="80" fixed="right">
@@ -122,8 +122,8 @@
             <el-table-column label="税费" width="90" align="right">
               <template #default="{ row }">{{ fmt(row.tax) }}</template>
             </el-table-column>
-            <el-table-column label="税后(折CNY)" width="130" align="right">
-              <template #default="{ row }"><span class="text-emerald bold">{{ fmtCNY(row.net_cny) }}</span></template>
+            <el-table-column label="税后" width="130" align="right">
+              <template #default="{ row }"><span class="text-emerald bold">{{ fmtDisplay(row.net_display ?? row.net_cny, row.display_currency, row.currency) }}</span></template>
             </el-table-column>
             <el-table-column label="状态" width="90">
               <template #default="{ row }">
@@ -143,8 +143,8 @@
         <el-tab-pane label="年度统计" name="yearly">
           <el-table :data="st.yearly || []" style="width: 100%">
             <el-table-column prop="year" label="年份" width="120" />
-            <el-table-column label="税后分红(折CNY)" align="right">
-              <template #default="{ row }"><span class="text-emerald bold">{{ fmtCNY(row.net_cny) }}</span></template>
+            <el-table-column label="税后分红" align="right">
+              <template #default="{ row }"><span class="text-emerald bold">{{ fmtDisplay(row.net, st.display_currency, h.currency) }}</span></template>
             </el-table-column>
           </el-table>
           <div v-if="!(st.yearly || []).length" class="empty-tip">暂无年度数据</div>
@@ -251,10 +251,12 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Delete, Edit } from '@element-plus/icons-vue'
 import { apiHolding, apiUpdateHolding, apiLots, apiCreateLot, apiCreateLotsBatch, apiDeleteLot, apiDividends, apiHoldingStats } from '../api'
-import { marketMap, fmt, fmtCNY, currencyMap, freqMap, FREQS } from '../utils/constants'
+import { marketMap, fmt, fmtDisplay, currencyMap, freqMap, FREQS } from '../utils/constants'
+import { useUserStore } from '../store/user'
 
 const route = useRoute()
 const id = route.params.id
+const userStore = useUserStore()
 
 function marketIcon(m) {
   return { a_share: '🍷', us_stock: '🇺🇸', hk_stock: '🇭🇰', fund: '📊' }[m] || '📈'
@@ -321,8 +323,11 @@ function sym(c) { return currencyMap[c]?.symbol || '' }
 async function load() {
   loading.value = true
   try {
+    // v8：币种转换仅在总览看板生效，持仓详情按 CNY 显示
+    const params = {}
     const [hh, ss, ll, dd] = await Promise.all([
-      apiHolding(id), apiHoldingStats(id), apiLots(id), apiDividends({ holding_id: id, page_size: 100 }),
+      apiHolding(id), apiHoldingStats(id, params), apiLots(id),
+      apiDividends({ holding_id: id, page_size: 100, ...params }),
     ])
     h.value = hh
     st.value = ss

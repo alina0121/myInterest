@@ -30,6 +30,9 @@ def _settings_out(s: UserSetting) -> dict:
             "auto_match_schedule": bool(s.auto_match_schedule),
             "push_enabled": bool(s.push_enabled),
             "wx_subscribe": bool(s.wx_subscribe),
+            # v8：账户元数据与可见币种（JSON 字符串透传，前端 JSON.parse）
+            "accounts_meta": s.accounts_meta,
+            "visible_currencies": s.visible_currencies,
             "updated_at": s.updated_at}
 
 

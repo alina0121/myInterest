@@ -10,8 +10,8 @@
       <div class="month-summary">
         <span class="legend-item"><span class="legend-dot confirmed"></span>已到账</span>
         <span class="legend-item"><span class="legend-dot pending"></span>预告</span>
-        <span>本月已确认：<b class="text-emerald">{{ fmtCNY(cal.month_confirmed_cny) }}</b></span>
-        <span>待确认：<b class="text-amber">{{ fmtCNY(cal.month_pending_cny) }}</b></span>
+        <span>本月已确认：<b class="text-emerald">{{ fmtDisplay(cal.month_confirmed, cal.display_currency) }}</b></span>
+        <span>待确认：<b class="text-amber">{{ fmtDisplay(cal.month_pending, cal.display_currency) }}</b></span>
       </div>
     </div>
 
@@ -40,7 +40,7 @@
       <div class="flow-head">
         <h3>本月分红流水</h3>
         <span class="text-muted flow-summary">
-          已到账 {{ fmtCNY(cal.month_confirmed_cny) }} · 预告 {{ fmtCNY(cal.month_pending_cny) }}
+          已到账 {{ fmtDisplay(cal.month_confirmed, cal.display_currency) }} · 预告 {{ fmtDisplay(cal.month_pending, cal.display_currency) }}
         </span>
       </div>
       <div v-if="!flowItems.length" class="empty-tip">本月暂无分红</div>
@@ -69,14 +69,17 @@
 import { computed, onMounted, ref } from 'vue'
 import { ArrowLeft, ArrowRight } from '@element-plus/icons-vue'
 import { apiCalendar } from '../api'
-import { fmt, fmtCNY, currencyMap } from '../utils/constants'
+import { fmt, fmtDisplay, currencyMap } from '../utils/constants'
+import { useUserStore } from '../store/user'
+
+const userStore = useUserStore()
 
 const WEEKS = ['一', '二', '三', '四', '五', '六', '日']
 
 const now = new Date()
 const year = ref(now.getFullYear())
 const month = ref(now.getMonth() + 1)
-const cal = ref({ days: {}, month_confirmed_cny: 0, month_pending_cny: 0 })
+const cal = ref({ days: {}, month_confirmed: 0, month_pending: 0, display_currency: 'CNY' })
 
 const cells = computed(() => {
   const y = year.value, m = month.value
@@ -112,7 +115,13 @@ const flowItems = computed(() => {
 function sym(c) { return currencyMap[c]?.symbol || '' }
 
 async function load() {
-  cal.value = await apiCalendar(year.value, month.value)
+  // v8：账户跟随 + 显示币种转换
+  const params = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    params.account = userStore.currentAccount
+  }
+  // v8：币种转换仅在总览看板生效，日历页按 CNY 显示
+  cal.value = await apiCalendar(year.value, month.value, params)
 }
 
 function prevMonth() {

@@ -19,16 +19,19 @@ router = APIRouter(prefix="/api/stats", tags=["stats"])
 
 
 @router.get("/summary")
-def summary(session: Session = Depends(get_session),
+def summary(account: str | None = None, display_currency: str | None = None,
+            session: Session = Depends(get_session),
             user: User = Depends(get_current_user)):
-    return ok(stats_service.summary(session, user.id))
+    """v8：支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.summary(session, user.id, account, display_currency))
 
 
 @router.get("/enhanced-summary")
-def enhanced_summary(session: Session = Depends(get_session),
+def enhanced_summary(account: str | None = None, display_currency: str | None = None,
+                     session: Session = Depends(get_session),
                      user: User = Depends(get_current_user)):
-    """新版看板汇总：含市值/盈亏/收益率等全部指标。"""
-    return ok(stats_service.enhanced_summary(session, user.id))
+    """新版看板汇总：含市值/盈亏/收益率等全部指标。v8 支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.enhanced_summary(session, user.id, account, display_currency))
 
 
 @router.get("/dashboard-metrics")
@@ -76,37 +79,51 @@ def save_dashboard_metrics(payload: dict,
 
 
 @router.get("/monthly-trend")
-def monthly_trend(range: str = "12m", session: Session = Depends(get_session),
+def monthly_trend(range: str = "12m", account: str | None = None,
+                  display_currency: str | None = None,
+                  session: Session = Depends(get_session),
                   user: User = Depends(get_current_user)):
-    return ok(stats_service.monthly_trend(session, user.id, range))
+    """v8：支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.monthly_trend(session, user.id, range, account, display_currency))
 
 
 @router.get("/by-market")
-def by_market(session: Session = Depends(get_session),
+def by_market(account: str | None = None, display_currency: str | None = None,
+              session: Session = Depends(get_session),
               user: User = Depends(get_current_user)):
-    return ok(stats_service.by_market(session, user.id))
+    """v8：支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.by_market(session, user.id, account, display_currency))
 
 
 @router.get("/forecast")
-def forecast(session: Session = Depends(get_session),
+def forecast(account: str | None = None, display_currency: str | None = None,
+             session: Session = Depends(get_session),
              user: User = Depends(get_current_user)):
-    return ok(stats_service.forecast(session, user.id))
+    """v8：支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.forecast(session, user.id, account, display_currency))
 
 
 @router.get("/top-holdings")
-def top_holdings(limit: int = 10, session: Session = Depends(get_session),
+def top_holdings(limit: int = 10, account: str | None = None,
+                 display_currency: str | None = None,
+                 session: Session = Depends(get_session),
                  user: User = Depends(get_current_user)):
-    return ok(stats_service.top_holdings(session, user.id, limit))
+    """v8：支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.top_holdings(session, user.id, limit, account, display_currency))
 
 
 @router.get("/yield-ranking")
-def yield_ranking(session: Session = Depends(get_session),
-                  user: User = Depends(get_current_user)):
-    return ok(stats_service.yield_ranking(session, user.id))
+def yield_ranking(account: str | None = None, display_currency: str | None = None,
+                 session: Session = Depends(get_session),
+                 user: User = Depends(get_current_user)):
+    """v8：支持 account 过滤 + display_currency 转换。"""
+    return ok(stats_service.yield_ranking(session, user.id, account, display_currency))
 
 
 @router.get("/holdings/{holding_id}")
-def holding_stats(holding_id: int, session: Session = Depends(get_session),
+def holding_stats(holding_id: int, display_currency: str | None = None,
+                  session: Session = Depends(get_session),
                   user: User = Depends(get_current_user)):
+    """v8：支持 display_currency 转换。"""
     h = get_owned_holding(session, user, holding_id)
-    return ok(stats_service.holding_stats(session, h))
+    return ok(stats_service.holding_stats(session, h, display_currency))

@@ -24,6 +24,7 @@
           <view class="item-name-row">
             <text class="item-name">{{ h.name }}</text>
             <text :class="['item-badge', badgeClass(h.market)]">{{ marketMap[h.market]?.label }}</text>
+            <text v-if="h.account" class="item-account">{{ h.account }}</text>
           </view>
           <view class="item-price">
             <text class="price-num">{{ h.current_price ? fmt(h.current_price) : '—' }}</text>
@@ -79,6 +80,7 @@ import { ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiHoldings } from '@/api'
 import { marketMap, badgeClass, fmt, moneyWith } from '@/utils/constants'
+import { userStore } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
 
 const list = ref([])
@@ -87,7 +89,12 @@ const loading = ref(false)
 async function load() {
   loading.value = true
   try {
-    const data = await apiHoldings()
+    // v8：传 account 参数给后端做服务端过滤
+    const params = {}
+    if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+      params.account = userStore.currentAccount
+    }
+    const data = await apiHoldings(params)
     list.value = data.items || []
   } finally {
     loading.value = false
@@ -113,6 +120,37 @@ onPullDownRefresh(load)
 <style scoped>
 .page { padding: 24rpx; }
 
+/* v8：账户切换条 */
+.chips {
+  display: flex; white-space: nowrap; padding: 8rpx 0 16rpx;
+}
+.chips-account { margin-bottom: 8rpx; }
+.chips-currency { margin-bottom: 20rpx; }
+.chip {
+  display: inline-flex; align-items: center; gap: 6rpx;
+  padding: 10rpx 22rpx; margin-right: 12rpx;
+  border-radius: 9999rpx; font-size: 24rpx; color: #64748b;
+  background: #fff; border: 1rpx solid #e2e8f0;
+  flex-shrink: 0;
+}
+.chip.on {
+  background: #1e3a8a; color: #fff; border-color: #1e3a8a;
+}
+.chip.archived { opacity: 0.5; }
+.chip-dot {
+  width: 12rpx; height: 12rpx; border-radius: 50%;
+  display: inline-block;
+}
+.chip-count {
+  font-size: 20rpx; background: rgba(0,0,0,0.08); color: inherit;
+  padding: 2rpx 8rpx; border-radius: 9999rpx; margin-left: 4rpx;
+}
+.chip.on .chip-count { background: rgba(255,255,255,0.2); }
+
+/* 币种筛选 chip */
+.c-chip { gap: 4rpx; }
+.c-symbol { font-weight: 600; }
+
 .loading-wrap { padding: 100rpx 0; text-align: center; }
 .loading-text { font-size: 26rpx; color: #94a3b8; }
 
@@ -136,14 +174,18 @@ onPullDownRefresh(load)
 
 /* 顶部：名称 + 价格 */
 .item-top { display: flex; justify-content: space-between; align-items: center; }
-.item-name-row { display: flex; align-items: center; gap: 12rpx; }
+.item-name-row { display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap; }
 .item-name {
   font-size: 30rpx; font-weight: 600; color: #1e293b;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 300rpx;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260rpx;
 }
 .item-badge {
   display: inline-block; font-size: 18rpx; line-height: 1;
   padding: 6rpx 12rpx; border-radius: 9999rpx; font-weight: 500;
+}
+.item-account {
+  font-size: 18rpx; padding: 4rpx 10rpx; border-radius: 9999rpx;
+  background: #f1f5f9; color: #64748b;
 }
 .item-price { text-align: right; }
 .price-num { font-size: 30rpx; font-weight: 700; color: #1e293b; }

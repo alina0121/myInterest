@@ -33,28 +33,87 @@ def _user_confirmed(session: Session, user_id: int) -> list[Dividend]:
     ).all())
 
 
+def _user_holdings(session: Session, user_id: int,
+                   account: str | None = None) -> list[Holding]:
+    """带账户过滤的持仓查询。account='__all__'/None 表示不过滤。
+    v8：不再按币种筛选，改为按 display_currency 转换显示。
+    """
+    stmt = select(Holding).where(Holding.user_id == user_id)
+    if account and account != "__all__":
+        stmt = stmt.where(Holding.account == account)
+    return list(session.exec(stmt).all())
+
+
+def _user_confirmed_filtered(session: Session, user_id: int,
+                            account: str | None = None) -> list[Dividend]:
+    """带账户过滤的已到账分红。无过滤时回退 _user_confirmed。
+    v8：不再按币种筛选，改为按 display_currency 转换显示。
+    """
+    if not account or account == "__all__":
+        return _user_confirmed(session, user_id)
+    divs = _user_confirmed(session, user_id)
+    holdings_map = {h.id: h for h in _user_holdings(session, user_id, account)}
+    return [d for d in divs if d.holding_id in holdings_map]
+
+
 def _net_cny(session: Session, div: Dividend) -> Decimal:
     return fx_service.to_cny(session, div.net_amount, div.currency, div.pay_date)
 
 
-def summary(session: Session, user_id: int) -> dict:
-    """看板汇总（docs/04 §6.1）。金额一律税后折 CNY；
-
-    - year_dividend_cny：本年已到账税后分红（按派息日年份归属）
-    - year_growth：同比 = (本年 - 去年) / 去年；去年为 0 时返回 None（不做除零）
-    - ttm_dividend_cny / ttm_monthly_avg：近 365 天税后分红 / 12（月均）
-    - next_month_forecast_cny：下月预告，取 pending 分红的【税前】折 CNY
+def _net_display(session: Session, div: Dividend,
+                 display_currency: str | None = None) -> Decimal:
+    """v8：按显示币种转换分红净额。
+    - None/'CNY'：折人民币（用派息日汇率，历史归账不波动）
+    - 'USD'/'HKD'：先折 CNY 再用今天汇率转成目标币种
+    - 'ORIGINAL'：保留原币种金额
     """
-    divs = _user_confirmed(session, user_id)
+    if not display_currency or display_currency == "CNY":
+        return _net_cny(session, div)
+    if display_currency == "ORIGINAL":
+        return Decimal(str(div.net_amount)).quantize(Decimal("0.01"))
+    # 先折 CNY（派息日汇率），再用今天汇率转成显示币种
+    cny = _net_cny(session, div)
+    return fx_service.from_cny(session, float(cny), display_currency, today_str())
+
+
+def _gross_display(session: Session, div: Dividend,
+                   display_currency: str | None = None) -> Decimal:
+    """v8：按显示币种转换分红税前金额（用于 pending 分红预估）。"""
+    if not display_currency or display_currency == "CNY":
+        return fx_service.to_cny(session, div.gross_amount, div.currency, div.pay_date)
+    if display_currency == "ORIGINAL":
+        return Decimal(str(div.gross_amount)).quantize(Decimal("0.01"))
+    cny = fx_service.to_cny(session, div.gross_amount, div.currency, div.pay_date)
+    return fx_service.from_cny(session, float(cny), display_currency, today_str())
+
+
+def summary(session: Session, user_id: int,
+           account: str | None = None,
+           display_currency: str | None = None) -> dict:
+    """看板汇总（docs/04 §6.1）。金额按 display_currency 转换显示；
+
+    - year_dividend：本年已到账税后分红（按派息日年份归属）
+    - year_growth：同比 = (本年 - 去年) / 去年；去年为 0 时返回 None（不做除零）
+    - ttm_dividend / ttm_monthly_avg：近 365 天税后分红 / 12（月均）
+    - next_month_forecast：下月预告，取 pending 分红的【税前】折算
+    - account/display_currency：v8 账户过滤 + 显示币种转换
+
+    v8 修正：ORIGINAL 模式下聚合统计（跨持仓多币种混算）无意义，回落 CNY。
+    单持仓的 holding_stats 仍保留 ORIGINAL 行为。
+    """
+    # v8：ORIGINAL 模式下聚合无意义（CNY+USD 混算），回落 CNY
+    if display_currency == "ORIGINAL":
+        display_currency = None
+    divs = _user_confirmed_filtered(session, user_id, account)
     year = today_str()[:4]
     prev_year = str(int(year) - 1)
 
-    year_cny = sum(_net_cny(session, d) for d in divs if d.pay_date[:4] == year)
-    prev_cny = sum(_net_cny(session, d) for d in divs if d.pay_date[:4] == prev_year)
+    year_amt = sum(_net_display(session, d, display_currency) for d in divs if d.pay_date[:4] == year)
+    prev_amt = sum(_net_display(session, d, display_currency) for d in divs if d.pay_date[:4] == prev_year)
     month = today_str()[:7]
     month_divs = [d for d in divs if d.pay_date[:7] == month]
 
-    holdings = list(session.exec(select(Holding).where(Holding.user_id == user_id)).all())
+    holdings = _user_holdings(session, user_id, account)
     breakdown: dict[str, int] = {}
     for h in holdings:
         breakdown[h.market] = breakdown.get(h.market, 0) + 1
@@ -62,71 +121,96 @@ def summary(session: Session, user_id: int) -> dict:
     since_years = [d.pay_date[:4] for d in divs]
     ttm_divs = [d for d in divs if d.pay_date >= days_ago_iso(365)]
 
-    # 下月预告：pending 分红（税前折 CNY）
+    # 下月预告：pending 分红（税前折算）
     nxt = _month_add(month, 1)
     pendings = list(session.exec(
         select(Dividend).where(Dividend.user_id == user_id, Dividend.status == PENDING)
     ).all())
+    # v8：pending 按账户过滤
+    if account and account != "__all__":
+        h_map = {h.id: h for h in _user_holdings(session, user_id, account)}
+        pendings = [p for p in pendings if p.holding_id in h_map]
     next_month_forecast = sum(
-        fx_service.to_cny(session, p.gross_amount, p.currency, p.pay_date)
+        _gross_display(session, p, display_currency)
         for p in pendings if p.pay_date[:7] == nxt
     )
 
-    year_cny_f, prev_cny_f = r2(year_cny), r2(prev_cny)
     return {
-        "year_dividend_cny": year_cny_f,
-        "year_growth": r2((year_cny - prev_cny) / prev_cny) if prev_cny > 0 else None,
-        "month_dividend_cny": r2(sum(_net_cny(session, d) for d in month_divs)),
+        "year_dividend": r2(year_amt),
+        "year_growth": r2((year_amt - prev_amt) / prev_amt) if prev_amt > 0 else None,
+        "month_dividend": r2(sum(_net_display(session, d, display_currency) for d in month_divs)),
         "month_count": len(month_divs),
-        "total_dividend_cny": r2(sum(_net_cny(session, d) for d in divs)),
+        "total_dividend": r2(sum(_net_display(session, d, display_currency) for d in divs)),
         "since_year": int(min(since_years)) if since_years else None,
         "holding_count": len(holdings),
         "holding_breakdown": breakdown,
-        "ttm_dividend_cny": r2(sum(_net_cny(session, d) for d in ttm_divs)),
-        "ttm_monthly_avg": r2(sum(_net_cny(session, d) for d in ttm_divs) / 12),
-        "next_month_forecast_cny": r2(next_month_forecast),
+        "ttm_dividend": r2(sum(_net_display(session, d, display_currency) for d in ttm_divs)),
+        "ttm_monthly_avg": r2(sum(_net_display(session, d, display_currency) for d in ttm_divs) / 12),
+        "next_month_forecast": r2(next_month_forecast),
+        "display_currency": display_currency or "CNY",
     }
 
 
-def monthly_trend(session: Session, user_id: int, rng: str = "12m") -> dict:
-    divs = _user_confirmed(session, user_id)
+def monthly_trend(session: Session, user_id: int, rng: str = "12m",
+                  account: str | None = None,
+                  display_currency: str | None = None) -> dict:
+    """v8：支持 account 过滤 + display_currency 转换。
+    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    """
+    if display_currency == "ORIGINAL":
+        display_currency = None
+    divs = _user_confirmed_filtered(session, user_id, account)
     amounts: dict[str, Decimal] = {}
     for d in divs:
         key = d.pay_date[:7]
-        amounts[key] = amounts.get(key, Decimal("0")) + _net_cny(session, d)
+        amounts[key] = amounts.get(key, Decimal("0")) + _net_display(session, d, display_currency)
 
     if rng == "year":
         year = today_str()[:4]
         months = [f"{year}-{m:02d}" for m in range(1, 13)]
     elif rng == "all":
-        since = summary(session, user_id).get("since_year") or today_str()[:4]
+        since = summary(session, user_id, account, display_currency).get("since_year") or today_str()[:4]
         months, cur = [], f"{since}-01"
         while cur <= today_str()[:7]:
             months.append(cur)
             cur = _month_add(cur, 1)
     else:  # 12m
         months = _last_months(12)
-    return {"months": months, "amounts_cny": [r2(amounts.get(m, 0)) for m in months]}
+    return {"months": months, "amounts": [r2(amounts.get(m, 0)) for m in months],
+            "display_currency": display_currency or "CNY"}
 
 
-def by_market(session: Session, user_id: int) -> dict:
-    """市场分红占比：分红表本身不存 market，需经 holding_id 反查持仓的市场。"""
-    holdings = {h.id: h.market for h in
-                session.exec(select(Holding).where(Holding.user_id == user_id)).all()}
+def by_market(session: Session, user_id: int,
+              account: str | None = None,
+              display_currency: str | None = None) -> dict:
+    """市场分红占比：分红表本身不存 market，需经 holding_id 反查持仓的市场。
+    v8：支持 account 过滤 + display_currency 转换。
+    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    """
+    if display_currency == "ORIGINAL":
+        display_currency = None
+    holdings = {h.id: h.market for h in _user_holdings(session, user_id, account)}
     agg: dict[str, Decimal] = {}
-    for d in _user_confirmed(session, user_id):
+    for d in _user_confirmed_filtered(session, user_id, account):
         market = holdings.get(d.holding_id)
         if market:
-            agg[market] = agg.get(market, Decimal("0")) + _net_cny(session, d)
-    return {"items": [{"market": m, "amount_cny": r2(v)} for m, v in agg.items()]}
+            agg[market] = agg.get(market, Decimal("0")) + _net_display(session, d, display_currency)
+    return {"items": [{"market": m, "amount": r2(v)} for m, v in agg.items()],
+            "display_currency": display_currency or "CNY"}
 
 
-def forecast(session: Session, user_id: int) -> dict:
+def forecast(session: Session, user_id: int,
+             account: str | None = None,
+             display_currency: str | None = None) -> dict:
     """未来 12 个月预测（docs/03 §6）。
 
     P0：published 全 0（预案表 P1 接入）；estimated 按近 3 年同月 dps 均值 × 当前持仓。
     后台关闭 forecast_by_history 时，estimated 直接全 0（只保留已公告预案口径）。
+    v8：支持 account 过滤 + display_currency 转换。
+    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
     """
+    if display_currency == "ORIGINAL":
+        display_currency = None
     months = _last_months(1)  # placeholder to get current month key
     cur = months[0]
     future = [_month_add(cur, i) for i in range(1, 13)]
@@ -135,9 +219,10 @@ def forecast(session: Session, user_id: int) -> dict:
 
     estimated = [Decimal("0")] * 12
     freq_summary: dict[str, int] = {}
-    holdings = (list(session.exec(select(Holding).where(Holding.user_id == user_id)).all())
+    holdings = (_user_holdings(session, user_id, account)
                 if history_enabled else [])
 
+    today = today_str()
     for h in holdings:
         freq_summary[h.freq] = freq_summary.get(h.freq, 0) + 1
         divs = list(session.exec(
@@ -155,14 +240,20 @@ def forecast(session: Session, user_id: int) -> dict:
         now = computed_summary(session, h)["shares_now"]
         if now <= 0:
             continue
-        today = today_str()
         for i, fm in enumerate(future):
             mm = fm[5:7]
             if mm not in months_set:
                 continue
             dps_avg = sum(dps_by_mm[mm]) / len(dps_by_mm[mm])
             est_orig = Decimal(str(dps_avg)) * Decimal(str(now))
-            estimated[i] += fx_service.to_cny(session, float(est_orig), h.currency, today)
+            # v8：按显示币种转换
+            if not display_currency or display_currency == "CNY":
+                estimated[i] += fx_service.to_cny(session, float(est_orig), h.currency, today)
+            elif display_currency == "ORIGINAL":
+                estimated[i] += est_orig
+            else:
+                cny = fx_service.to_cny(session, float(est_orig), h.currency, today)
+                estimated[i] += fx_service.from_cny(session, float(cny), display_currency, today)
 
     return {
         "months": future,
@@ -172,56 +263,86 @@ def forecast(session: Session, user_id: int) -> dict:
     }
 
 
-def top_holdings(session: Session, user_id: int, limit: int = 10) -> dict:
-    holdings = {h.id: h for h in
-                session.exec(select(Holding).where(Holding.user_id == user_id)).all()}
+def top_holdings(session: Session, user_id: int, limit: int = 10,
+                 account: str | None = None,
+                 display_currency: str | None = None) -> dict:
+    """v8：支持 account 过滤 + display_currency 转换。
+    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    """
+    if display_currency == "ORIGINAL":
+        display_currency = None
+    holdings = {h.id: h for h in _user_holdings(session, user_id, account)}
     agg: dict[int, Decimal] = {}
-    for d in _user_confirmed(session, user_id):
+    for d in _user_confirmed_filtered(session, user_id, account):
         if d.holding_id in holdings:
-            agg[d.holding_id] = agg.get(d.holding_id, Decimal("0")) + _net_cny(session, d)
+            agg[d.holding_id] = agg.get(d.holding_id, Decimal("0")) + _net_display(session, d, display_currency)
     items = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:limit]
-    return {"items": [{"holding_id": hid, "name": holdings[hid].name, "amount_cny": r2(v)}
-                      for hid, v in items]}
+    return {"items": [{"holding_id": hid, "name": holdings[hid].name, "amount": r2(v)}
+                      for hid, v in items],
+            "display_currency": display_currency or "CNY"}
 
 
-def yield_ranking(session: Session, user_id: int) -> dict:
-    """股息率排行：现价股息率（需手填现价）vs 成本股息率 YoC（docs/03 §5）。"""
+def yield_ranking(session: Session, user_id: int,
+                  account: str | None = None,
+                  display_currency: str | None = None) -> dict:
+    """股息率排行：现价股息率（需手填现价）vs 成本股息率 YoC（docs/03 §5）。
+    v8：支持 account 过滤 + display_currency 转换。
+    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    """
+    if display_currency == "ORIGINAL":
+        display_currency = None
     today = today_str()
     year = today[:4]
-    holdings = list(session.exec(select(Holding).where(Holding.user_id == user_id)).all())
+    holdings = _user_holdings(session, user_id, account)
     # 批量取 securities（含 latest_price）
     sec_map = security_service.security_map(
         session, [(h.market, h.code) for h in holdings])
     items = []
+    user_divs = _user_confirmed_filtered(session, user_id, account)
     for h in holdings:
         cs = computed_summary(session, h)
         if cs["shares_now"] <= 0 or cs["ttm_dps"] <= 0:
             continue
-        divs = [d for d in _user_confirmed(session, user_id) if d.holding_id == h.id]
-        year_div_cny = sum(_net_cny(session, d) for d in divs if d.pay_date[:4] == year)
+        divs = [d for d in user_divs if d.holding_id == h.id]
+        year_div_amt = sum(_net_display(session, d, display_currency) for d in divs if d.pay_date[:4] == year)
         # 现价：优先用 securities.latest_price（爬虫实时更新），回落 holdings.current_price
         sec = sec_map.get((h.market, h.code))
         latest_price = (sec.latest_price if sec and sec.latest_price else None) or h.current_price
         # 现价股息率 = TTM 每股分红 / 最新价（没价格则为 None，前端显示「—」）
         yield_price = (r4(cs["ttm_dps"] / latest_price)
                        if latest_price and latest_price > 0 else None)
-        # 当前市值（折 CNY）= 最新价 × 净持仓 × 当日汇率
-        market_value = (r2(Decimal(str(latest_price)) * Decimal(str(cs["shares_now"]))
-                           * fx_service.get_rate_cny(session, h.currency, today))
-                        if latest_price else None)
+        # 当前市值（按显示币种转换）= 最新价 × 净持仓 × 汇率
+        if latest_price:
+            if not display_currency or display_currency == "CNY":
+                market_value = r2(Decimal(str(latest_price)) * Decimal(str(cs["shares_now"]))
+                                  * fx_service.get_rate_cny(session, h.currency, today))
+            elif display_currency == "ORIGINAL":
+                market_value = r2(Decimal(str(latest_price)) * Decimal(str(cs["shares_now"])))
+            else:
+                cny = Decimal(str(latest_price)) * Decimal(str(cs["shares_now"])) * fx_service.get_rate_cny(session, h.currency, today)
+                market_value = fx_service.from_cny(session, float(cny), display_currency, today)
+        else:
+            market_value = None
         items.append({
             "holding_id": h.id, "name": h.name, "market": h.market,
-            "market_value_cny": market_value,
-            "year_dividend_cny": r2(year_div_cny),
+            "market_value": market_value,
+            "year_dividend": r2(year_div_amt),
             "yield_price": yield_price,
             "yoc_ttm": cs["yoc_ttm"],
         })
     items.sort(key=lambda x: x["yoc_ttm"], reverse=True)
-    return {"items": items}
+    return {"items": items, "display_currency": display_currency or "CNY"}
 
 
-def holding_stats(session: Session, h: Holding) -> dict:
-    """单持仓统计（持仓详情页，docs/04 §6.7）。"""
+def holding_stats(session: Session, h: Holding,
+                  display_currency: str | None = None) -> dict:
+    """单持仓统计（持仓详情页，docs/04 §6.7）。
+
+    v8：支持 display_currency 转换。
+    - year_net / total_net / yearly[].net：按显示币种折算的税后分红
+    - year_gross：本年税前（原币种，gross_amount 求和）
+    - cs 中的 year_dividend / total_dividend 仍为原币种
+    """
     cs = computed_summary(session, h)
     divs = [d for d in session.exec(
         select(Dividend).where(Dividend.holding_id == h.id, Dividend.status == CONFIRMED)
@@ -230,53 +351,58 @@ def holding_stats(session: Session, h: Holding) -> dict:
     yearly: dict[str, Decimal] = {}
     for d in divs:
         y = d.pay_date[:4]
-        yearly[y] = yearly.get(y, Decimal("0")) + _net_cny(session, d)
+        yearly[y] = yearly.get(y, Decimal("0")) + _net_display(session, d, display_currency)
     return {
         **cs,
         "year_gross": r2(sum(d.gross_amount for d in divs if d.pay_date[:4] == year)),
-        "year_net_cny": r2(sum(_net_cny(session, d) for d in divs if d.pay_date[:4] == year)),
-        "total_net": cs["total_dividend"],
-        "total_net_cny": r2(sum(_net_cny(session, d) for d in divs)),
-        "yearly": [{"year": y, "net_cny": r2(v)} for y, v in sorted(yearly.items())],
+        "year_net": r2(sum(_net_display(session, d, display_currency) for d in divs if d.pay_date[:4] == year)),
+        "total_net": r2(sum(_net_display(session, d, display_currency) for d in divs)),
+        "yearly": [{"year": y, "net": r2(v)} for y, v in sorted(yearly.items())],
+        "display_currency": display_currency or "CNY",
     }
 
 
 # ========== Enhanced Summary (for new dashboard hero card) ==========
 
-def enhanced_summary(session: Session, user_id: int) -> dict:
+def enhanced_summary(session: Session, user_id: int,
+                     account: str | None = None,
+                     display_currency: str | None = None) -> dict:
     """新版看板汇总：所有可选指标一次性计算，前端按用户偏好选取展示。
 
     计算口径：
-    - forecast_year_cny: 预测年度分红 = forecast 12个月 estimated 合计
-    - year_received_cny: 今年已收（confirmed 当年）
-    - total_cost_cny: 总成本 = Σ 各 holding cost_total × 汇率
-    - net_investment_cny: 净投入 = 买入总额 − 卖出总额（原币 × 今日汇率）
-    - market_value_cny: 总市值 = Σ current_price × shares_now × 汇率
-    - floating_pnl_cny: 浮动盈亏 = 总市值 − 总成本
+    - forecast_year: 预测年度分红 = forecast 12个月 estimated 合计
+    - year_received: 今年已收（confirmed 当年）
+    - total_cost: 总成本 = Σ 各 holding cost_total × 汇率
+    - net_investment: 净投入 = 买入总额 − 卖出总额（原币 × 今日汇率）
+    - market_value: 总市值 = Σ current_price × shares_now × 汇率
+    - floating_pnl: 浮动盈亏 = 总市值 − 总成本
     - pnl_rate: 盈亏率 = 浮动盈亏 / 总成本
     - yield_on_cost: 成本息率 = 预测年分红 / 总成本
     - yield_on_price: 市值息率 = 预测年分红 / 总市值
-    - monthly_forecast_cny: 月均预测分红 = 预测年分红 / 12
-    - daily_forecast_cny: 日均预测分红 = 预测年分红 / 365
-    - total_received_cny: 累计收息（不限年）
+    - monthly_forecast: 月均预测分红 = 预测年分红 / 12
+    - daily_forecast: 日均预测分红 = 预测年分红 / 365
+    - total_received: 累计收息（不限年）
     - holding_count: 持仓只数
+    v8：支持 account 过滤 + display_currency 转换。
+    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
     """
+    # v8：ORIGINAL 模式下聚合无意义（CNY+USD+HKD 混算），回落 CNY
+    if display_currency == "ORIGINAL":
+        display_currency = None
     today = today_str()
 
     # 1) 基础数据
-    holdings = list(session.exec(
-        select(Holding).where(Holding.user_id == user_id)
-    ).all())
-    divs_confirmed = _user_confirmed(session, user_id)
+    holdings = _user_holdings(session, user_id, account)
+    divs_confirmed = _user_confirmed_filtered(session, user_id, account)
     year = today[:4]
 
     # 2) 预测年度分红（复用 forecast 的 estimated 12月合计）
-    fc = forecast(session, user_id)
+    fc = forecast(session, user_id, account, display_currency)
     forecast_year = sum(Decimal(str(v)) for v in fc["estimated"])
 
     # 3) 今年已收 & 累计收息
-    year_received = sum(_net_cny(session, d) for d in divs_confirmed if d.pay_date[:4] == year)
-    total_received = sum(_net_cny(session, d) for d in divs_confirmed)
+    year_received = sum(_net_display(session, d, display_currency) for d in divs_confirmed if d.pay_date[:4] == year)
+    total_received = sum(_net_display(session, d, display_currency) for d in divs_confirmed)
 
     # 4) 总成本 & 净投入 & 总市值（逐 holding 计算后聚合）
     total_cost = Decimal("0")
@@ -295,23 +421,54 @@ def enhanced_summary(session: Session, user_id: int) -> dict:
         n = shares_now(lots_list)
         cost = Decimal(str(cost_basis(lots_list)))   # 当前持仓的加权平均成本
 
-        # 总成本折 CNY（用今日汇率，与市值口径统一）
-        rate_today = fx_service.get_rate_cny(session, h.currency, today)
-        total_cost += cost * rate_today
+        # v8：按显示币种转换成本
+        if not display_currency or display_currency == "CNY":
+            rate_today = fx_service.get_rate_cny(session, h.currency, today)
+            total_cost += cost * rate_today
+        elif display_currency == "ORIGINAL":
+            total_cost += cost
+        else:
+            cny = cost * fx_service.get_rate_cny(session, h.currency, today)
+            total_cost += fx_service.from_cny(session, float(cny), display_currency, today)
 
-        # 总市值折 CNY：优先用 securities.latest_price（爬虫实时更新），
+        # 总市值：优先用 securities.latest_price（爬虫实时更新），
         # 回落到 holdings.current_price（创建时快照，可能过时）
         sec = sec_map.get((h.market, h.code))
         latest_price = (sec.latest_price if sec and sec.latest_price else None) or h.current_price
         if latest_price and latest_price > 0:
-            market_value += (Decimal(str(latest_price)) * Decimal(str(n))) * rate_today
+            if not display_currency or display_currency == "CNY":
+                rate_today = fx_service.get_rate_cny(session, h.currency, today)
+                market_value += (Decimal(str(latest_price)) * Decimal(str(n))) * rate_today
+            elif display_currency == "ORIGINAL":
+                market_value += Decimal(str(latest_price)) * Decimal(str(n))
+            else:
+                cny = Decimal(str(latest_price)) * Decimal(str(n)) * fx_service.get_rate_cny(session, h.currency, today)
+                market_value += fx_service.from_cny(session, float(cny), display_currency, today)
 
         # 买入/卖出总额（净投入 = 买入 − 卖出）
         for l in lots_list:
             if l.direction == "buy":
-                buy_total += (Decimal(str(l.shares)) * Decimal(str(l.price)) + Decimal(str(l.fee or 0))) * rate_today
+                buy_amt = Decimal(str(l.shares)) * Decimal(str(l.price)) + Decimal(str(l.fee or 0))
             elif l.direction == "sell":
-                sell_total += (Decimal(str(l.shares)) * Decimal(str(l.price)) - Decimal(str(l.fee or 0))) * rate_today
+                buy_amt = Decimal(str(l.shares)) * Decimal(str(l.price)) - Decimal(str(l.fee or 0))
+            else:
+                buy_amt = Decimal("0")
+            if display_currency == "ORIGINAL":
+                buy_total += buy_amt
+            elif not display_currency or display_currency == "CNY":
+                buy_total += buy_amt * fx_service.get_rate_cny(session, h.currency, today)
+            else:
+                cny = buy_amt * fx_service.get_rate_cny(session, h.currency, today)
+                buy_total += fx_service.from_cny(session, float(cny), display_currency, today)
+            if l.direction == "sell":
+                sell_amt = Decimal(str(l.shares)) * Decimal(str(l.price)) - Decimal(str(l.fee or 0))
+                if display_currency == "ORIGINAL":
+                    sell_total += sell_amt
+                elif not display_currency or display_currency == "CNY":
+                    sell_total += sell_amt * fx_service.get_rate_cny(session, h.currency, today)
+                else:
+                    cny = sell_amt * fx_service.get_rate_cny(session, h.currency, today)
+                    sell_total += fx_service.from_cny(session, float(cny), display_currency, today)
 
     net_investment = buy_total - sell_total
 
@@ -325,31 +482,34 @@ def enhanced_summary(session: Session, user_id: int) -> dict:
 
     # 6) 同比（复用原 summary 的 year_growth）
     prev_year = str(int(year) - 1)
-    prev_cny = sum(_net_cny(session, d) for d in divs_confirmed if d.pay_date[:4] == prev_year)
-    year_growth = (year_received - prev_cny) / prev_cny if prev_cny > 0 else None
+    prev_amt = sum(_net_display(session, d, display_currency) for d in divs_confirmed if d.pay_date[:4] == prev_year)
+    year_growth = (year_received - prev_amt) / prev_amt if prev_amt > 0 else None
 
+    # v8：统一固定字段名（无后缀），返回 display_currency 标识
     return {
         # 核心指标
-        "forecast_year_cny": r2(forecast_year),
-        "year_received_cny": r2(year_received),
+        "forecast_year": r2(forecast_year),
+        "year_received": r2(year_received),
         "year_growth": r2(year_growth) if year_growth is not None else None,
         # 成本面
-        "total_cost_cny": r2(total_cost),
-        "net_investment_cny": r2(net_investment),
+        "total_cost": r2(total_cost),
+        "net_investment": r2(net_investment),
         # 估值面
-        "market_value_cny": r2(market_value),
+        "market_value": r2(market_value),
         "holding_count": len(holdings),
         # 收益率
         "yield_on_cost": r4(yield_on_cost) if yield_on_cost is not None else None,
         "yield_on_price": r4(yield_on_price) if yield_on_price is not None else None,
         # 时间维度
-        "monthly_forecast_cny": r2(monthly_forecast),
-        "daily_forecast_cny": r2(daily_forecast),
+        "monthly_forecast": r2(monthly_forecast),
+        "daily_forecast": r2(daily_forecast),
         # 盈亏
-        "floating_pnl_cny": r2(floating_pnl),
+        "floating_pnl": r2(floating_pnl),
         "pnl_rate": r4(pnl_rate) if pnl_rate is not None else None,
         # 累计
-        "total_received_cny": r2(total_received),
+        "total_received": r2(total_received),
+        # 显示币种标识
+        "display_currency": display_currency or "CNY",
         # 预测明细（给前端图表用）
         "forecast_months": fc["months"],
         "forecast_published": fc["published"],

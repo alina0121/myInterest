@@ -23,6 +23,26 @@
         <el-button v-if="$route.name === 'dashboard'" type="primary" @click="$router.push('/dividends?create=1')">
           + 添加分红
         </el-button>
+        <!-- v8：账户切换下拉 -->
+        <el-dropdown v-if="accounts.length > 1" trigger="click" @command="onAccountCommand">
+          <el-button size="small" plain>
+            <span class="acct-dot" :style="{ background: currentAccountColor }"></span>
+            {{ currentAccountText }}
+          </el-button>
+          <template #dropdown>
+            <el-dropdown-menu>
+              <el-dropdown-item command="__all__" :class="{ 'is-active': userStore.currentAccount === '__all__' }">
+                全部账户
+              </el-dropdown-item>
+              <el-dropdown-item v-for="a in accounts" :key="a.name"
+                                :command="a.name"
+                                :class="{ 'is-active': userStore.currentAccount === a.name }">
+                <span class="acct-dot" :style="{ background: a.color || '#94a3b8' }"></span>
+                {{ a.name }}{{ a.archived ? '（归档）' : '' }}
+              </el-dropdown-item>
+            </el-dropdown-menu>
+          </template>
+        </el-dropdown>
         <el-dropdown trigger="click" @command="onCommand">
           <div class="user-box">
             <div class="avatar">{{ userStore.nickname.charAt(0).toUpperCase() }}</div>
@@ -54,12 +74,27 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '../store/user'
+import { apiAccounts } from '../api'
 
 const router = useRouter()
 const route = useRoute()
 const userStore = useUserStore()
+
+// v8：账户切换
+const accounts = ref([])
+const currentAccountText = computed(() => {
+  if (userStore.currentAccount === '__all__') return '全部账户'
+  const a = accounts.value.find(x => x.name === userStore.currentAccount)
+  return a ? a.name : '全部账户'
+})
+const currentAccountColor = computed(() => {
+  if (userStore.currentAccount === '__all__') return '#1e3a8a'
+  const a = accounts.value.find(x => x.name === userStore.currentAccount)
+  return a?.color || '#94a3b8'
+})
 
 const menus = [
   { path: '/', label: '总览看板', icon: '📊' },
@@ -83,6 +118,24 @@ function onCommand(cmd) {
     router.push('/admin')
   }
 }
+
+// v8：账户切换
+function onAccountCommand(name) {
+  userStore.setCurrentAccount(name)
+  // 触发当前页重新加载（通过路由 push 同页）
+  const fullPath = route.fullPath
+  router.replace(fullPath).then(() => {
+    // 通知子页面刷新：通过 location.reload() 简单粗暴，或用 router 跳转触发
+    window.location.reload()
+  })
+}
+
+onMounted(async () => {
+  try {
+    const data = await apiAccounts()
+    accounts.value = data.items || []
+  } catch (e) { /* 未登录或没账户 */ }
+})
 </script>
 
 <style scoped>
@@ -118,6 +171,13 @@ function onCommand(cmd) {
 .nav-icon { font-size: 16px; }
 
 .topbar-right { display: flex; align-items: center; gap: 16px; }
+
+/* v8：账户切换 */
+.acct-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 6px; vertical-align: middle;
+}
+.is-active { color: var(--el-color-primary); font-weight: 600; }
 .user-box { display: flex; align-items: center; gap: 10px; cursor: pointer; outline: none; }
 .avatar {
   width: 34px; height: 34px; border-radius: 50%; background: #dbeafe;

@@ -135,6 +135,7 @@ import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { apiByMarket, apiTopHoldings, apiYieldRanking, apiMonthlyTrend, apiForecast } from '@/api'
 import { MARKETS, marketMap, currencyMap, badgeClass } from '@/utils/constants'
+import { userStore } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
 
 const marketList = ref([])
@@ -142,6 +143,18 @@ const yearList = ref([])
 const topList = ref([])
 const yieldList = ref([])
 const forecast = ref({ months: [], amounts_cny: [] })
+
+/** v8：账户跟随 + 显示币种参数（从 store 读） */
+function filterParams() {
+  const p = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    p.account = userStore.currentAccount
+  }
+  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
+    p.display_currency = userStore.displayCurrency
+  }
+  return p
+}
 
 function fmt(n) {
   return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -201,10 +214,19 @@ function yocPct(v) {
   return Math.max(4, Math.round((v / yieldMax.value) * 100))
 }
 
-onShow(async () => {
+// ---------- 加载 ----------
+async function loadData() {
   try {
+    // v8：账户跟随 + 显示币种转换
+    const fp = filterParams()
+    const acct = userStore.currentAccount && userStore.currentAccount !== '__all__'
+      ? { account: userStore.currentAccount } : {}
+    const dc = userStore.displayCurrency && userStore.displayCurrency !== 'CNY'
+      ? { display_currency: userStore.displayCurrency } : {}
+    const acctParams = { ...acct, ...dc }
     const [m, top, yld, trend, fc] = await Promise.all([
-      apiByMarket(), apiTopHoldings(), apiYieldRanking(), apiMonthlyTrend('12m'), apiForecast(),
+      apiByMarket(fp), apiTopHoldings(10, acctParams), apiYieldRanking(acctParams),
+      apiMonthlyTrend('12m', fp), apiForecast(dc),
     ])
     marketList.value = m.items || []
     topList.value = (top.items || []).slice(0, 10)
@@ -218,7 +240,9 @@ onShow(async () => {
     yearList.value = Object.entries(yearMap).map(([year, total_cny]) => ({ year, total_cny }))
     forecast.value = fc
   } catch (e) { /* toast 已统一 */ }
-})
+}
+
+onShow(loadData)
 </script>
 
 <style scoped>

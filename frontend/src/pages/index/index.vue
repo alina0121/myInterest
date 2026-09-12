@@ -89,6 +89,7 @@
 import { computed, ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend } from '@/api'
+import { userStore } from '@/store/user'
 // #ifdef H5
 import WebLayout from '@/components/WebLayout.vue'
 // #endif
@@ -98,6 +99,18 @@ const enhanced = ref({})
 const registry = ref([])
 const selectedMetrics = ref([])
 const trend = ref({ months: [], amounts_cny: [] })
+
+/** v8：账户跟随 + 显示币种参数（从 store 读） */
+function filterParams() {
+  const p = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    p.account = userStore.currentAccount
+  }
+  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
+    p.display_currency = userStore.displayCurrency
+  }
+  return p
+}
 
 // ---------- 计算属性 ----------
 const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year_cny')
@@ -150,10 +163,12 @@ function goSettings() {
 // ---------- 加载 ----------
 async function load() {
   try {
+    // v8：账户跟随 + 币种过滤（metrics 与账户/币种无关）
+    const fp = filterParams()
     const [enh, fm, t] = await Promise.all([
-      apiEnhancedSummary(),
+      apiEnhancedSummary(fp),
       apiDashboardMetrics(),
-      apiMonthlyTrend('12m'),
+      apiMonthlyTrend('12m', fp),
     ])
     enhanced.value = enh
     registry.value = fm.registry

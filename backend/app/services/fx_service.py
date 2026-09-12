@@ -88,3 +88,30 @@ def to_cny(session: Session, amount: float, currency: str, date_iso: str) -> Dec
     """
     return (Decimal(str(amount)) * get_rate_cny(session, currency, date_iso)
             ).quantize(Decimal("0.01"))
+
+
+def from_cny(session: Session, amount_cny: float, target_currency: str, date_iso: str) -> Decimal:
+    """CNY 金额按「date_iso 当日汇率」折算成目标币种，返回 2 位小数 Decimal。
+
+    v8：用于显示币种转换——所有金额先折 CNY，再按用户选的显示币种转出。
+    CNY → CNY 直接返回原值；其他币种用 1/rate_cny(target) 反算。
+    """
+    if target_currency == "CNY":
+        return Decimal(str(amount_cny)).quantize(Decimal("0.01"))
+    rate_cny = get_rate_cny(session, target_currency, date_iso)  # 1 target = ? CNY
+    if rate_cny == 0:
+        return Decimal(str(amount_cny)).quantize(Decimal("0.01"))
+    return (Decimal(str(amount_cny)) / rate_cny).quantize(Decimal("0.01"))
+
+
+def to_display(session: Session, amount: float, original_currency: str,
+               display_currency: str, date_iso: str) -> Decimal:
+    """统一显示币种转换：原币 → CNY → 显示币种。
+
+    v8：display_currency='CNY' 折人民币；'USD'/'HKD' 再从 CNY 转出；
+        'ORIGINAL' 不折算，保留原币种金额。
+    """
+    if display_currency == "ORIGINAL":
+        return Decimal(str(amount)).quantize(Decimal("0.01"))
+    cny = to_cny(session, amount, original_currency, date_iso)
+    return from_cny(session, float(cny), display_currency, date_iso)

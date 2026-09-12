@@ -2,9 +2,13 @@
   <div>
     <!-- 工具栏 -->
     <div class="toolbar">
-      <el-input v-model="keyword" placeholder="搜索代码 / 名称" style="width: 220px" clearable @keyup.enter="load" />
+      <el-input v-model="keyword" placeholder="搜索代码 / 名称" style="width: 200px" clearable @keyup.enter="load" />
       <el-select v-model="market" placeholder="全部市场" style="width: 130px" clearable @change="load">
         <el-option v-for="m in MARKETS" :key="m.value" :label="m.label" :value="m.value" />
+      </el-select>
+      <!-- v8：账户筛选 -->
+      <el-select v-model="account" placeholder="全部账户" style="width: 160px" clearable @change="load">
+        <el-option v-for="a in accounts" :key="a.name" :label="a.name + (a.archived ? '（归档）' : '')" :value="a.name" />
       </el-select>
       <el-button type="primary" @click="openAdd">+ 添加持仓</el-button>
     </div>
@@ -30,14 +34,20 @@
         <el-table-column label="币种" width="70" align="center">
           <template #default="{ row }">{{ row.currency }}</template>
         </el-table-column>
+        <el-table-column label="账户" width="100" align="center">
+          <template #default="{ row }">
+            <span v-if="row.account" class="acct-tag">{{ row.account }}</span>
+            <span v-else class="text-muted">—</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="lot_count" label="批次" width="70" align="center" />
         <el-table-column label="本年分红" width="120" align="right">
           <template #default="{ row }">
-            <span class="text-emerald bold">{{ fmtCNY(row.year_dividend_cny ?? row.year_dividend) }}</span>
+            <span class="text-emerald bold">{{ sym(row.currency) }}{{ fmt(row.year_dividend) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="累计分红" width="120" align="right">
-          <template #default="{ row }">{{ fmtCNY(row.total_dividend_cny ?? row.total_dividend) }}</template>
+          <template #default="{ row }">{{ sym(row.currency) }}{{ fmt(row.total_dividend) }}</template>
         </el-table-column>
         <el-table-column label="股息率(TTM)" width="110" align="right">
           <template #default="{ row }">
@@ -83,7 +93,10 @@
             <el-input :model-value="form.name" disabled />
           </el-form-item>
           <el-form-item label="账户">
-            <el-input v-model="form.account" placeholder="选填，如 招商证券" />
+            <el-select v-model="form.account" filterable allow-create default-first-option
+              placeholder="选填，如 招商证券" style="width: 100%">
+              <el-option v-for="a in accounts" :key="a.name" :label="a.name" :value="a.name" />
+            </el-select>
           </el-form-item>
           <el-form-item label="派息频率">
             <el-select v-model="form.freq" style="width: 100%">
@@ -120,17 +133,24 @@
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { apiHoldings, apiCreateHolding, apiDeleteHolding, apiSecurities } from '../api'
-import { marketMap, freqMap, FREQS, fmt, fmtCNY, currencyMap } from '../utils/constants'
+import { apiHoldings, apiCreateHolding, apiDeleteHolding, apiSecurities, apiAccounts } from '../api'
+import { marketMap, freqMap, FREQS, fmt, currencyMap } from '../utils/constants'
+import { useUserStore } from '../store/user'
 
 const router = useRouter()
+const userStore = useUserStore()
+
 const list = ref([])
 const loading = ref(false)
 const keyword = ref('')
 const market = ref('')
+// v8：账户筛选（来自 userStore.currentAccount，本地拉一份 accounts 供下拉）
+const account = ref('')
+const accounts = ref([])
+
 const addDlg = ref(false)
 const saving = ref(false)
 const securities = ref([])
@@ -154,6 +174,13 @@ async function loadSecurities() {
   }
 }
 
+async function loadAccounts() {
+  try {
+    const data = await apiAccounts()
+    accounts.value = data.items || []
+  } catch (e) { /* toast 已统一 */ }
+}
+
 function onSecurityChange(key) {
   const [m, c] = key.split('|')
   const s = securities.value.find(x => x.market === m && x.code === c)
@@ -174,6 +201,7 @@ async function load() {
     const params = {}
     if (keyword.value) params.keyword = keyword.value
     if (market.value) params.market = market.value
+    if (account.value) params.account = account.value
     const data = await apiHoldings(params)
     list.value = data.items || []
   } finally {
@@ -225,11 +253,22 @@ async function delHolding(row) {
   } catch (e) { /* toast 已统一 */ }
 }
 
-onMounted(load)
+// 监听 store 中 currentAccount 变化（其他页面切换账户时同步本地）
+watch(() => userStore.currentAccount, (val) => {
+  account.value = val === '__all__' ? '' : val
+  load()
+})
+
+onMounted(() => {
+  // 初始化本地筛选状态：账户来自 store
+  account.value = userStore.currentAccount === '__all__' ? '' : userStore.currentAccount
+  loadAccounts()
+  load()
+})
 </script>
 
 <style scoped>
-.toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; }
+.toolbar { display: flex; gap: 12px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
 .toolbar .el-button { margin-left: auto; }
 .badge { font-size: 12px; padding: 2px 8px; border-radius: 4px; font-weight: 500; }
 .bold { font-weight: 500; }
@@ -237,4 +276,6 @@ onMounted(load)
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; column-gap: 16px; }
 .price-tip { font-size: 13px; color: #475569; margin: -8px 0 12px 0; }
 .text-muted { color: #94a3b8; font-size: 12px; }
+.text-emerald { color: #059669; }
+.acct-tag { font-size: 12px; padding: 2px 8px; border-radius: 4px; background: #f1f5f9; color: #475569; }
 </style>

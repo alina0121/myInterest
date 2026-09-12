@@ -8,42 +8,89 @@
 
     <view class="login-card">
       <view class="tabs">
-        <view :class="['tab', mode === 'login' ? 'active' : '']" @click="mode = 'login'">登录</view>
-        <view :class="['tab', mode === 'register' ? 'active' : '']" @click="mode = 'register'">注册</view>
+        <view :class="['tab', mode === 'pwd' ? 'active' : '']" @click="mode = 'pwd'">密码登录</view>
+        <view :class="['tab', mode === 'email' ? 'active' : '']" @click="mode = 'email'">邮箱验证码</view>
+        <!-- #ifdef MP-WEIXIN -->
+        <view :class="['tab', mode === 'wx' ? 'active' : '']" @click="mode = 'wx'">微信</view>
+        <!-- #endif -->
       </view>
 
-      <view class="form">
+      <!-- 密码登录 / 注册 -->
+      <view v-if="mode === 'pwd'" class="form">
         <view class="field">
-          <text class="f-label">{{ mode === 'login' ? '账号' : '用户名' }}</text>
-          <input class="f-input" v-model="form.account" placeholder="用户名 / 邮箱（注册时为用户名）" />
+          <text class="f-label">{{ subMode === 'login' ? '账号' : '用户名' }}</text>
+          <input class="f-input" v-model="pwdForm.account" placeholder="用户名 / 邮箱（注册时为用户名）" />
         </view>
-        <view v-if="mode === 'register'" class="field">
+        <view v-if="subMode === 'register'" class="field">
           <text class="f-label">邮箱</text>
-          <input class="f-input" v-model="form.email" placeholder="选填" />
+          <input class="f-input" v-model="pwdForm.email" placeholder="选填" />
         </view>
         <view class="field">
           <text class="f-label">密码</text>
-          <input class="f-input" v-model="form.password" password placeholder="至少 8 位" />
+          <input class="f-input" v-model="pwdForm.password" password placeholder="至少 8 位" />
         </view>
-        <view v-if="mode === 'register'" class="field">
+        <view v-if="subMode === 'register'" class="field">
           <text class="f-label">昵称</text>
-          <input class="f-input" v-model="form.nickname" placeholder="选填" />
+          <input class="f-input" v-model="pwdForm.nickname" placeholder="选填" />
         </view>
-
-        <button class="btn-primary submit" :loading="loading" @click="submit">
-          {{ mode === 'login' ? '登 录' : '注 册' }}
+        <button class="btn-primary submit" :loading="loading" @click="submitPwd">
+          {{ subMode === 'login' ? '登 录' : '注 册' }}
         </button>
+        <view class="hint">
+          <text v-if="subMode === 'login'">还没有账号？<text class="link" @click="subMode = 'register'">立即注册</text></text>
+          <text v-else>已有账号？<text class="link" @click="subMode = 'login'">返回登录</text></text>
+        </view>
+      </view>
 
-        <!-- 微信小程序端：一键登录（docs/05 §3 微信登录，必须用户点击触发） -->
-        <!-- #ifdef MP-WEIXIN -->
-        <view class="divider"><text class="divider-text">其他登录方式</text></view>
+      <!-- 邮箱验证码登录 / 注册 -->
+      <view v-else-if="mode === 'email'" class="form">
+        <view class="field">
+          <text class="f-label">邮箱</text>
+          <input class="f-input" v-model="emailForm.email" placeholder="请输入邮箱地址" />
+        </view>
+        <view class="field code-field">
+          <text class="f-label">验证码</text>
+          <view class="code-row">
+            <input class="f-input code-input" v-model="emailForm.code" placeholder="6 位验证码" />
+            <button class="btn-code" :disabled="cooldown > 0" @click="sendCode('email')">
+              {{ cooldown > 0 ? `${cooldown}s` : '获取验证码' }}
+            </button>
+          </view>
+        </view>
+        <view v-if="subMode === 'register'" class="field">
+          <text class="f-label">昵称（选填）</text>
+          <input class="f-input" v-model="emailForm.nickname" placeholder="留空则用邮箱前缀" />
+        </view>
+        <view v-if="subMode === 'register'" class="field">
+          <text class="f-label">密码（选填）</text>
+          <input class="f-input" v-model="emailForm.password" password placeholder="设密码后可用密码登录" />
+        </view>
+        <button class="btn-primary submit" :loading="loading" @click="submitEmail">
+          {{ subMode === 'login' ? '登 录' : '注 册' }}
+        </button>
+        <view class="hint">
+          <text v-if="subMode === 'login'">没有账号？<text class="link" @click="subMode = 'register'">立即注册</text></text>
+          <text v-else>已有账号？<text class="link" @click="subMode = 'login'">返回登录</text></text>
+        </view>
+      </view>
+
+      <!-- 微信小程序端：一键登录（docs/05 §3 微信登录，必须用户点击触发） -->
+      <!-- #ifdef MP-WEIXIN -->
+      <view v-else class="form">
+        <view class="wx-tip">点击下方按钮使用微信一键登录</view>
         <button class="btn-wx" :loading="wxLoading" @click="onWxLogin">
           <text class="wx-icon">✦</text> 微信一键登录
         </button>
-        <!-- #endif -->
+        <view class="hint">登录后可在「我的」中绑定邮箱</view>
+      </view>
+      <!-- #endif -->
 
-        <view v-if="mode === 'login'" class="hint">还没有账号？<text class="link" @click="mode = 'register'">立即注册</text></view>
-        <view v-else class="hint">已有账号？<text class="link" @click="mode = 'login'">返回登录</text></view>
+      <!-- 切换其他登录方式 -->
+      <view class="divider" v-if="mode !== 'wx'"><text class="divider-text">其他方式</text></view>
+      <view class="other-methods" v-if="mode !== 'wx'">
+        <!-- #ifdef MP-WEIXIN -->
+        <text class="link-small" @click="mode = 'wx'">微信登录</text>
+        <!-- #endif -->
       </view>
     </view>
   </view>
@@ -51,39 +98,94 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import { apiLogin, apiRegister, apiWxLogin } from '@/api'
+import {
+  apiLogin, apiRegister, apiWxLogin,
+  apiSendCode, apiEmailLogin, apiEmailRegister,
+} from '@/api'
 import { setAuth } from '@/store/user'
 
-const mode = ref('login')
+const mode = ref('pwd')        // pwd / email / wx
+const subMode = ref('login')   // login / register
 const loading = ref(false)
 const wxLoading = ref(false)
-const form = reactive({ account: '', email: '', password: '', nickname: '' })
+const cooldown = ref(0)
 
-async function submit() {
-  if (!form.account || !form.password) {
+const pwdForm = reactive({ account: '', email: '', password: '', nickname: '' })
+const emailForm = reactive({ email: '', code: '', nickname: '', password: '' })
+
+// ---------- 密码登录/注册 ----------
+async function submitPwd() {
+  if (!pwdForm.account || !pwdForm.password) {
     return uni.showToast({ title: '请填写账号和密码', icon: 'none' })
   }
-  if (mode.value === 'register' && form.password.length < 8) {
+  if (subMode.value === 'register' && pwdForm.password.length < 8) {
     return uni.showToast({ title: '密码至少 8 位', icon: 'none' })
   }
   loading.value = true
   try {
     let data
-    if (mode.value === 'login') {
-      data = await apiLogin(form.account, form.password)
+    if (subMode.value === 'login') {
+      data = await apiLogin(pwdForm.account, pwdForm.password)
     } else {
       data = await apiRegister({
-        username: form.account,
-        email: form.email || null,
-        password: form.password,
-        nickname: form.nickname || form.account,
+        username: pwdForm.account,
+        email: pwdForm.email || null,
+        password: pwdForm.password,
+        nickname: pwdForm.nickname || pwdForm.account,
       })
     }
     setAuth(data.access_token, data.user)
-    uni.showToast({ title: mode.value === 'login' ? '登录成功' : '注册成功', icon: 'success' })
+    uni.showToast({ title: subMode.value === 'login' ? '登录成功' : '注册成功', icon: 'success' })
     setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 400)
   } catch (e) {
     // 错误 toast 已由 request 统一处理
+  } finally {
+    loading.value = false
+  }
+}
+
+// ---------- 邮箱验证码 ----------
+async function sendCode(channel) {
+  if (channel === 'email' && !emailForm.email) {
+    return uni.showToast({ title: '请先填写邮箱', icon: 'none' })
+  }
+  try {
+    const purpose = subMode.value === 'register' ? 'register' : 'login'
+    await apiSendCode(channel, emailForm.email, purpose)
+    uni.showToast({ title: '验证码已发送', icon: 'none' })
+    // 启动 60 秒倒计时
+    cooldown.value = 60
+    const timer = setInterval(() => {
+      cooldown.value -= 1
+      if (cooldown.value <= 0) clearInterval(timer)
+    }, 1000)
+  } catch (e) {
+    // 错误已统一处理
+  }
+}
+
+async function submitEmail() {
+  if (!emailForm.email || !emailForm.code) {
+    return uni.showToast({ title: '请填写邮箱和验证码', icon: 'none' })
+  }
+  loading.value = true
+  try {
+    let data
+    if (subMode.value === 'login') {
+      data = await apiEmailLogin(emailForm.email, emailForm.code)
+    } else {
+      data = await apiEmailRegister({
+        email: emailForm.email,
+        code: emailForm.code,
+        nickname: emailForm.nickname || null,
+        password: emailForm.password || null,
+      })
+    }
+    setAuth(data.access_token, data.user)
+    uni.showToast({ title: subMode.value === 'login' ? '登录成功' : '注册成功', icon: 'success' })
+    setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 400)
+  } catch (e) {
+    // 错误已统一处理
   } finally {
     loading.value = false
   }
@@ -153,6 +255,21 @@ async function onWxLogin() {
 .f-label { display: block; font-size: 24rpx; color: #94a3b8; margin-bottom: 12rpx; }
 .f-input { font-size: 30rpx; height: 44rpx; }
 .submit { margin-top: 50rpx; }
+
+/* 验证码行 */
+.code-field { border-bottom: none; padding-bottom: 0; }
+.code-row { display: flex; align-items: center; gap: 16rpx; }
+.code-input { flex: 1; }
+.btn-code {
+  flex-shrink: 0; min-width: 180rpx; height: 60rpx; line-height: 60rpx;
+  font-size: 24rpx; padding: 0 16rpx; margin: 0;
+  background: #1e3a8a; color: #fff; border-radius: 12rpx; border: none;
+}
+.btn-code[disabled] { background: #94a3b8; }
+.btn-code::after { border: none; }
+
+.wx-tip { padding: 40rpx 0; font-size: 26rpx; color: #94a3b8; text-align: center; }
+
 .divider {
   display: flex; align-items: center; margin: 40rpx 0 24rpx;
 }
@@ -162,6 +279,9 @@ async function onWxLogin() {
 .divider-text {
   padding: 0 20rpx; font-size: 24rpx; color: #94a3b8;
 }
+.other-methods { text-align: center; }
+.link-small { font-size: 26rpx; color: #1e3a8a; }
+
 .btn-wx {
   background: #07c160; color: #fff; border-radius: 44rpx;
   font-size: 30rpx; height: 88rpx; line-height: 88rpx; text-align: center;

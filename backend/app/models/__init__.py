@@ -13,6 +13,7 @@ from .system_config import SystemConfig
 from .tax_rule import TaxRule
 from .user import User
 from .user_setting import UserSetting
+from .verify_code import VerifyCode
 
 __all__ = [
     "User",
@@ -29,4 +30,5 @@ __all__ = [
     "Announcement",
     "Feedback",
     "AdminOperationLog",
+    "VerifyCode",
 ]

@@ -22,7 +22,7 @@ TAX_RULE_SEEDS = [
     ("bond", "债券利息", 0.00, None, None, "个人投资者暂免征收"),
 ]
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 8
 
 
 def _table_columns(session: Session, table: str) -> set[str]:
@@ -109,6 +109,30 @@ def migrate_dashboard_metrics(session: Session) -> None:
         log.info("added column dashboard_metrics to user_settings")
 
 
+def migrate_accounts_meta(session: Session) -> None:
+    """v8：user_settings 表新增 accounts_meta 字段（账户排序/颜色/归档 JSON）。
+
+    新库 create_all 已带该列；旧库用 ALTER TABLE 补列，默认 NULL。
+    幂等：列已存在即跳过。
+    """
+    if "accounts_meta" not in _table_columns(session, "user_settings"):
+        session.exec(text("ALTER TABLE user_settings ADD COLUMN accounts_meta TEXT"))
+        session.commit()
+        log.info("added column accounts_meta to user_settings")
+
+
+def migrate_visible_currencies(session: Session) -> None:
+    """v8：user_settings 表新增 visible_currencies 字段（用户勾选的可见币种 JSON）。
+
+    新库 create_all 已带该列；旧库用 ALTER TABLE 补列，默认 NULL。
+    幂等：列已存在即跳过。
+    """
+    if "visible_currencies" not in _table_columns(session, "user_settings"):
+        session.exec(text("ALTER TABLE user_settings ADD COLUMN visible_currencies TEXT"))
+        session.commit()
+        log.info("added column visible_currencies to user_settings")
+
+
 def create_indexes(session: Session) -> None:
     """SQLModel 无法表达的部分唯一索引（docs/02 §6 已发布预案防重）。"""
     session.exec(text(
@@ -153,6 +177,9 @@ def init_db(seed_fx: bool = True) -> None:
         migrate_crawl_enabled(session)
         # v6：user_settings 加 dashboard_metrics 列（首页指标偏好）
         migrate_dashboard_metrics(session)
+        # v8：user_settings 加 accounts_meta / visible_currencies 列（账户元数据/币种筛选）
+        migrate_accounts_meta(session)
+        migrate_visible_currencies(session)
         # 升级库：按已有分红历史回填 securities.freq（新库为空，立即返回）
         from .services import security_service
         security_service.refresh_all_freq(session)

@@ -93,11 +93,61 @@ SPECS: dict[str, dict] = {
         "env_key": "XI_REFRESH_TOKEN_DAYS",
         "label": "刷新令牌有效期(天)", "help": "refresh token 有效期；修改对新签发的令牌立即生效。"},
     "wx_appid": {
-        "category": "安全", "type": _STR, "default": "", "env_key": "XI_WX_APPID",
+        "category": "登录方式", "type": _STR, "default": "", "env_key": "XI_WX_APPID",
         "label": "微信小程序 AppID", "help": "小程序登录用；AppID 与 Secret 都配置后自动启用真实微信登录，否则为 mock 模式。"},
     "wx_secret": {
-        "category": "安全", "type": _STR, "default": "", "env_key": "XI_WX_SECRET",
+        "category": "登录方式", "type": _STR, "default": "", "env_key": "XI_WX_SECRET",
         "sensitive": True, "label": "微信小程序 Secret", "help": "小程序登录密钥；页面脱敏显示，留空保存表示不修改。"},
+
+    # ── 登录方式：邮件 / 短信 / 验证码参数 ─────────────────────────
+    "mail_enabled": {
+        "category": "登录方式", "type": _BOOL, "default": False,
+        "label": "启用邮件验证码", "help": "开启后才能用邮箱验证码登录/注册/找回密码；需先配置 SMTP 服务器。"},
+    "smtp_host": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "label": "SMTP 服务器", "help": "如 smtp.qq.com / smtp.163.com / smtp.gmail.com。"},
+    "smtp_port": {
+        "category": "登录方式", "type": _INT, "default": 465, "min": 1, "max": 65535,
+        "label": "SMTP 端口", "help": "SSL 默认 465；STARTTLS 用 587；非加密 25（不推荐）。"},
+    "smtp_user": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "label": "SMTP 用户名", "help": "登录 SMTP 服务的账号，通常就是邮箱地址。"},
+    "smtp_password": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "sensitive": True, "label": "SMTP 密码", "help": "邮箱授权码（不是登录密码）；页面脱敏显示，留空保存表示不修改。"},
+    "smtp_sender": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "label": "发件人地址", "help": "显示的发件人邮箱；留空则使用 SMTP 用户名。"},
+    "smtp_use_ssl": {
+        "category": "登录方式", "type": _BOOL, "default": True,
+        "label": "使用 SSL", "help": "开启用 SMTP_SSL（端口 465）；关闭用 STARTTLS（端口 587）。"},
+    "sms_enabled": {
+        "category": "登录方式", "type": _BOOL, "default": False,
+        "label": "启用短信验证码", "help": "V2 短信 SDK 接入前的开关；默认关闭，开启后前端展示短信验证码入口。"},
+    "sms_provider": {
+        "category": "登录方式", "type": _STR, "default": "aliyun",
+        "label": "短信服务商", "help": "aliyun（阿里云）/tencent（腾讯云）；V2 接入时用。"},
+    "sms_access_key": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "sensitive": True, "label": "短信 AccessKey", "help": "短信服务访问密钥；页面脱敏显示。"},
+    "sms_secret": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "sensitive": True, "label": "短信 Secret", "help": "短信服务密钥；页面脱敏显示。"},
+    "sms_sign": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "label": "短信签名", "help": "如「攒息」；需在短信服务商后台审核通过。"},
+    "sms_template_login": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "label": "登录短信模板ID", "help": "短信服务商提供的模板编号；V2 接入时用。"},
+    "sms_template_reset": {
+        "category": "登录方式", "type": _STR, "default": "",
+        "label": "重置密码短信模板ID", "help": "短信服务商提供的模板编号；V2 接入时用。"},
+    "code_ttl_minutes": {
+        "category": "登录方式", "type": _INT, "default": 10, "min": 1, "max": 60,
+        "label": "验证码有效期(分钟)", "help": "邮箱/短信验证码的有效时长；超时未使用即作废。"},
+    "code_send_interval_sec": {
+        "category": "登录方式", "type": _INT, "default": 60, "min": 10, "max": 600,
+        "label": "验证码发送间隔(秒)", "help": "同一目标的发送频率限制，防止滥发。"},
 
     # ── 统计预测 ────────────────────────────────────────────────
     "forecast_by_history": {

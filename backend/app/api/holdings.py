@@ -39,13 +39,20 @@ def holding_out(session: Session, h: Holding, system_freq: str | None = None,
 @router.get("")
 def list_holdings(market: str | None = None, keyword: str | None = None,
                   freq: str | None = None,
+                  account: str | None = None,
                   session: Session = Depends(get_session),
                   user: User = Depends(get_current_user)):
+    """v8：去掉币种筛选，改为按 display_currency 转换（前端 store 控制）。
+    account 支持 '__all__'/None 表示全部。
+    """
     stmt = select(Holding).where(Holding.user_id == user.id)
     if market:
         stmt = stmt.where(Holding.market == market)
     if freq:
         stmt = stmt.where(Holding.freq == freq)
+    # v8：账户筛选
+    if account and account != "__all__":
+        stmt = stmt.where(Holding.account == account)
     holdings = list(session.exec(stmt.order_by(Holding.id.desc())).all())  # type: ignore
     if keyword:
         kw = keyword.lower()

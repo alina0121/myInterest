@@ -55,8 +55,8 @@
         <el-table-column label="税费" width="90" align="right">
           <template #default="{ row }">{{ fmt(row.tax) }}</template>
         </el-table-column>
-        <el-table-column label="税后(折CNY)" width="120" align="right">
-          <template #default="{ row }"><span class="text-emerald bold">{{ fmtCNY(row.net_cny) }}</span></template>
+        <el-table-column label="税后" width="120" align="right">
+          <template #default="{ row }"><span class="text-emerald bold">{{ fmtDisplay(row.net_display ?? row.net_cny, row.display_currency, row.currency) }}</span></template>
         </el-table-column>
         <el-table-column label="状态" width="90">
           <template #default="{ row }">
@@ -214,7 +214,10 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Plus, Delete } from '@element-plus/icons-vue'
 import { apiDividends, apiCreateDividend, apiCreateDividendsBatch, apiHoldings } from '../api'
-import { MARKETS, marketMap, fmt, fmtCNY, currencyMap } from '../utils/constants'
+import { MARKETS, marketMap, fmt, fmtDisplay, currencyMap } from '../utils/constants'
+import { useUserStore } from '../store/user'
+
+const userStore = useUserStore()
 
 const route = useRoute()
 const list = ref([])
@@ -251,6 +254,11 @@ async function load() {
     if (year.value) params.year = year.value
     if (market.value) params.market = market.value
     if (status.value) params.status = status.value
+    // v8：账户跟随 + 显示币种转换
+    if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+      params.account = userStore.currentAccount
+    }
+    // v8：币种转换仅在总览看板生效，分红页按 CNY 显示
     const data = await apiDividends(params)
     list.value = data.items || []
     total.value = data.total || list.value.length

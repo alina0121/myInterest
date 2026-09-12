@@ -22,17 +22,37 @@ def get_owned_dividend(session: Session, user: User, dividend_id: int) -> Divide
 
 
 def dividend_out(session: Session, d: Dividend, holding: Holding,
-                 with_allocations: bool = False) -> dict:
+                 with_allocations: bool = False,
+                 display_currency: str | None = None) -> dict:
+    """v8：新增 display_currency 参数，按显示币种转换金额。
+    - None/'CNY'：net_cny 用派息日汇率折 CNY（历史归账）
+    - 'USD'/'HKD'：net_display 用今天汇率从 CNY 转出
+    - 'ORIGINAL'：net_display 保留原币种金额
+    """
+    net_cny = float(fx_service.to_cny(session, d.net_amount, d.currency, d.pay_date))
     data = {
         "id": d.id, "holding_id": d.holding_id, "schedule_id": d.schedule_id,
         "holding_name": holding.name, "code": holding.code, "market": holding.market,
         "ex_date": d.ex_date, "record_date": d.record_date, "pay_date": d.pay_date,
         "dps": d.dps, "shares": d.eligible_shares,
         "gross_amount": d.gross_amount, "tax": d.tax, "net_amount": d.net_amount,
-        "net_cny": float(fx_service.to_cny(session, d.net_amount, d.currency, d.pay_date)),
+        "net_cny": net_cny,
         "currency": d.currency, "div_type": d.div_type, "source": d.source,
         "status": d.status, "tax_overridden": bool(d.tax_overridden), "note": d.note,
     }
+    # v8：按显示币种转换
+    if display_currency and display_currency != "CNY":
+        if display_currency == "ORIGINAL":
+            data["net_display"] = float(d.net_amount)
+        else:
+            data["net_display"] = float(
+                fx_service.from_cny(session, net_cny, display_currency,
+                                    __import__('datetime').date.today().isoformat())
+            )
+        data["display_currency"] = display_currency
+    else:
+        data["net_display"] = net_cny
+        data["display_currency"] = "CNY"
     if with_allocations:
         allocs = session.exec(select(DividendAllocation)
                               .where(DividendAllocation.dividend_id == d.id)
@@ -47,10 +67,11 @@ def dividend_out(session: Session, d: Dividend, holding: Holding,
 @router.get("")
 def list_dividends(year: int | None = None, market: str | None = None,
                    holding_id: int | None = None, status: str | None = None,
+                   account: str | None = None, display_currency: str | None = None,
                    page: int = 1, page_size: int = 20, expand: str | None = None,
                    session: Session = Depends(get_session),
                    user: User = Depends(get_current_user)):
-    # 先把该用户所有持仓捞成 id→Holding 映射：市场筛选、出参拼名称都要用，
+    # 先把该用户所有持仓捞成 id→Holding 映射：市场/账户筛选、出参拼名称都要用，
     # 避免逐条分红再查一次持仓（N+1 查询）
     holdings = {h.id: h for h in
                 session.exec(select(Holding).where(Holding.user_id == user.id)).all()}
@@ -66,6 +87,10 @@ def list_dividends(year: int | None = None, market: str | None = None,
     elif market is not None:
         ids = {hid for hid, h in holdings.items() if h.market == market}
         divs = [d for d in divs if d.holding_id in ids]
+    # v8：账户筛选（通过 holding.account 反查）
+    if account and account != "__all__":
+        ids = {hid for hid, h in holdings.items() if h.account == account}
+        divs = [d for d in divs if d.holding_id in ids]
     if year is not None:
         divs = [d for d in divs if d.pay_date[:4] == str(year)]  # 按派息日年份归属
     if status is not None:
@@ -78,7 +103,8 @@ def list_dividends(year: int | None = None, market: str | None = None,
     # expand=allocations 时列表也带批次明细，默认不带以减小响应体
     want_alloc = expand is not None and "allocations" in expand
     return ok({
-        "items": [dividend_out(session, d, holdings[d.holding_id], want_alloc)
+        "items": [dividend_out(session, d, holdings[d.holding_id], want_alloc,
+                                display_currency)
                   for d in slice_],
         "total": total, "page": page, "page_size": page_size,
     })

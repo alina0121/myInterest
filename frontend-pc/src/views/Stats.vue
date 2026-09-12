@@ -29,10 +29,10 @@
             </template>
           </el-table-column>
           <el-table-column label="市值" width="120" align="right">
-            <template #default="{ row }">{{ fmtCNY(row.market_value_cny) }}</template>
+            <template #default="{ row }">{{ fmtDisplay(row.market_value, row.display_currency) }}</template>
           </el-table-column>
           <el-table-column label="年分红" width="110" align="right">
-            <template #default="{ row }">{{ fmtCNY(row.year_dividend_cny) }}</template>
+            <template #default="{ row }">{{ fmtDisplay(row.year_dividend, row.display_currency) }}</template>
           </el-table-column>
           <el-table-column label="股息率(现价)" width="120" align="right">
             <template #default="{ row }">
@@ -68,8 +68,11 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { apiMonthlyTrend, apiByMarket, apiTopHoldings, apiYieldRanking, apiHoldings } from '../api'
-import { fmtCNY, marketMap, freqMap } from '../utils/constants'
+import { fmtDisplay, marketMap, freqMap, currencyMap } from '../utils/constants'
 import { useEchart } from '../utils/echart'
+import { useUserStore } from '../store/user'
+
+const userStore = useUserStore()
 
 const yearEl = ref(null)
 const marketEl = ref(null)
@@ -90,19 +93,29 @@ const fc = useEchart(freqEl, freqOpt)
 const yieldList = ref([])
 
 onMounted(async () => {
+  // v8：币种转换仅在总览看板生效，统计页按 CNY 显示
+  const params = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    params.account = userStore.currentAccount
+  }
   const [trend, market, top, yld, holdings] = await Promise.all([
-    apiMonthlyTrend('24m'), apiByMarket(), apiTopHoldings(10), apiYieldRanking(), apiHoldings(),
+    apiMonthlyTrend('24m', params), apiByMarket(params), apiTopHoldings(10, params),
+    apiYieldRanking(params), apiHoldings(params),
   ])
+
+  // 后端返回 display_currency=CNY（不传 display_currency 时默认）
+  const dispCur = trend.display_currency || market.display_currency || 'CNY'
+  const sym = currencyMap[dispCur]?.symbol || '¥'
 
   // 年度聚合
   const yearMap = {}
   trend.months?.forEach((mo, i) => {
     const y = mo.slice(0, 4)
-    yearMap[y] = (yearMap[y] || 0) + (trend.amounts_cny?.[i] || 0)
+    yearMap[y] = (yearMap[y] || 0) + (trend.amounts?.[i] || 0)
   })
   const years = Object.entries(yearMap).sort(([a], [b]) => a - b)
   yearOpt.value = {
-    tooltip: { trigger: 'axis' },
+    tooltip: { trigger: 'axis', valueFormatter: (v) => fmtDisplay(v, dispCur) },
     grid: { left: 60, right: 20, top: 20, bottom: 30 },
     xAxis: { type: 'category', data: years.map(([y]) => y + '年') },
     yAxis: { type: 'value' },
@@ -115,15 +128,16 @@ onMounted(async () => {
 
   // 各市场累计分红（横向条形，更接近原型 bar 形态）
   const mItems = (market.items || [])
+
   marketOpt.value = {
-    tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
+    tooltip: { trigger: 'axis', formatter: `{b}: ${sym}{c}` },
     grid: { left: 80, right: 30, top: 20, bottom: 30 },
     xAxis: { type: 'value' },
     yAxis: { type: 'category', data: mItems.map((m) => marketMap[m.market]?.label || m.market) },
     series: [{
-      type: 'bar', data: mItems.map((m) => Number((m.amount_cny || 0).toFixed(2))), barMaxWidth: 24,
+      type: 'bar', data: mItems.map((m) => Number((m.amount || 0).toFixed(2))), barMaxWidth: 24,
       itemStyle: { color: '#3b82f6', borderRadius: [0, 6, 6, 0] },
-      label: { show: true, position: 'right', formatter: '¥{c}' },
+      label: { show: true, position: 'right', formatter: `${sym}{c}` },
     }],
   }
   mc.render()
@@ -131,12 +145,12 @@ onMounted(async () => {
   // Top10 横向条形
   const tops = (top.items || []).slice(0, 10).reverse()
   topOpt.value = {
-    tooltip: { trigger: 'axis', formatter: '{b}: ¥{c}' },
+    tooltip: { trigger: 'axis', formatter: `{b}: ${sym}{c}` },
     grid: { left: 110, right: 40, top: 10, bottom: 30 },
     xAxis: { type: 'value' },
     yAxis: { type: 'category', data: tops.map((t) => t.name), axisLabel: { fontSize: 12 } },
     series: [{
-      type: 'bar', data: tops.map((t) => Number(t.amount_cny)), barMaxWidth: 18,
+      type: 'bar', data: tops.map((t) => Number(t.amount)), barMaxWidth: 18,
       itemStyle: { color: '#3b82f6', borderRadius: [0, 6, 6, 0] },
     }],
   }

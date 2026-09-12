@@ -74,7 +74,7 @@ async def validation_handler(_request: Request, exc: RequestValidationError):
 
 
 # ---------- 路由 ----------
-from .api import (admin, auth, calendar, community, dividends, holdings, lots,  # noqa: E402
+from .api import (accounts, admin, auth, calendar, community, dividends, holdings, lots,  # noqa: E402
                   schedules, settings, stats, system)
 
 app.include_router(auth.router)
@@ -85,6 +85,7 @@ app.include_router(schedules.router)
 app.include_router(stats.router)
 app.include_router(calendar.router)
 app.include_router(settings.router)
+app.include_router(accounts.router)
 app.include_router(system.router)
 app.include_router(community.router)
 app.include_router(admin.router)

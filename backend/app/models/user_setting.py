@@ -16,4 +16,7 @@ class UserSetting(SQLModel, table=True):
     push_enabled: int = 1          # App 推送开关（1=开 / 0=关）
     wx_subscribe: int = 0          # 小程序订阅消息是否已授权（1=是）
     dashboard_metrics: Optional[str] = None  # 首页指标偏好（JSON 数组，存 key 列表）
+    # v8：账户元数据（JSON 数组 [{name,broker,color,sort,archived}]）与可见币种（JSON 数组 ["CNY","USD","HKD"]）
+    accounts_meta: Optional[str] = None      # 账户排序/颜色/归档元数据
+    visible_currencies: Optional[str] = None  # 用户勾选的可见币种列表
     updated_at: str = Field(default_factory=now_str)  # 更新时间

@@ -1,10 +1,27 @@
 import { get, post, put, httpPatch, del } from './http'
 
 // ---------- 认证 ----------
+// 登录页调用时本地无 token，HTTP 拦截器自动跳过 Authorization 头
 export const apiLogin = (account, password) => post('/api/auth/login', { account, password })
 export const apiRegister = (payload) => post('/api/auth/register', payload)
+// 邮箱验证码：send-code/email-login/email-register/reset-password 为游客态调用；
+// bind-email 需登录态（自动带 token）
+export const apiSendCode = (channel, target, purpose) =>
+  post('/api/auth/send-code', { channel, target, purpose })
+export const apiEmailLogin = (email, code) =>
+  post('/api/auth/email-login', { email, code })
+export const apiEmailRegister = (payload) =>
+  post('/api/auth/email-register', payload)
+export const apiResetPassword = (email, code, newPassword) =>
+  post('/api/auth/reset-password', { email, code, new_password: newPassword })
+export const apiBindEmail = (email, code) =>
+  post('/api/auth/bind-email', { email, code })
 export const apiMe = () => get('/api/auth/me')
 export const apiLogout = () => post('/api/auth/logout')
+
+// ---------- 账户管理（v8：账户元数据 + 持仓聚合） ----------
+export const apiAccounts = () => get('/api/accounts')
+export const apiAccountsMeta = (accounts_meta) => put('/api/accounts/meta', { accounts_meta })
 
 // ---------- 持仓 ----------
 export const apiHoldings = (params) => get('/api/holdings', params)
@@ -24,19 +41,19 @@ export const apiCreateDividend = (payload) => post('/api/dividends', payload)
 export const apiCreateDividendsBatch = (dividends) => post('/api/dividends/batch', { dividends })
 
 // ---------- 统计 ----------
-export const apiSummary = () => get('/api/stats/summary')
-export const apiEnhancedSummary = () => get('/api/stats/enhanced-summary')
+export const apiSummary = (params = {}) => get('/api/stats/summary', params)
+export const apiEnhancedSummary = (params = {}) => get('/api/stats/enhanced-summary', params)
 export const apiDashboardMetrics = () => get('/api/stats/dashboard-metrics')
 export const apiSaveDashboardMetrics = (selected) => put('/api/stats/dashboard-metrics', { selected })
-export const apiMonthlyTrend = (range = '12m') => get('/api/stats/monthly-trend', { range })
-export const apiByMarket = () => get('/api/stats/by-market')
-export const apiForecast = () => get('/api/stats/forecast')
-export const apiTopHoldings = (limit = 10) => get('/api/stats/top-holdings', { limit })
-export const apiYieldRanking = () => get('/api/stats/yield-ranking')
-export const apiHoldingStats = (id) => get(`/api/stats/holdings/${id}`)
+export const apiMonthlyTrend = (range = '12m', params = {}) => get('/api/stats/monthly-trend', { range, ...params })
+export const apiByMarket = (params = {}) => get('/api/stats/by-market', params)
+export const apiForecast = (params = {}) => get('/api/stats/forecast', params)
+export const apiTopHoldings = (limit = 10, params = {}) => get('/api/stats/top-holdings', { limit, ...params })
+export const apiYieldRanking = (params = {}) => get('/api/stats/yield-ranking', params)
+export const apiHoldingStats = (id, params = {}) => get(`/api/stats/holdings/${id}`, params)
 
 // ---------- 日历 ----------
-export const apiCalendar = (year, month) => get('/api/calendar', { year, month })
+export const apiCalendar = (year, month, params = {}) => get('/api/calendar', { year, month, ...params })
 
 // ---------- 预案（用户端） ----------
 export const apiUpcoming = () => get('/api/schedules/upcoming')

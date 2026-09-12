@@ -104,6 +104,7 @@
 import { computed, ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiCalendar } from '@/api'
+import { userStore } from '@/store/user'
 import { currencyMap } from '@/utils/constants'
 import WebLayout from '@/components/WebLayout.vue'
 
@@ -156,7 +157,15 @@ const timelineList = computed(() => {
 
 async function load() {
   selectedDay.value = null
-  data.value = await apiCalendar(year.value, month.value)
+  // v8：账户跟随
+  const params = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    params.account = userStore.currentAccount
+  }
+  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
+    params.display_currency = userStore.displayCurrency
+  }
+  data.value = await apiCalendar(year.value, month.value, params)
   // #ifdef MP-WEIXIN || MP-ALIPAY
   uni.stopPullDownRefresh()
   // #endif

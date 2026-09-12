@@ -77,6 +77,7 @@ import { ref } from 'vue'
 import { onShow, onReachBottom, onPullDownRefresh } from '@dcloudio/uni-app'
 import { apiDividends } from '@/api'
 import { MARKETS, marketMap, currencyMap, badgeClass } from '@/utils/constants'
+import { userStore } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
 
 const list = ref([])
@@ -90,6 +91,18 @@ const hasMore = ref(false)
 const loading = ref(false)
 const netSum = ref(0)
 const pendSum = ref(0)
+
+/** v8：账户跟随 + 显示币种参数（从 store 读） */
+function filterParams() {
+  const p = {}
+  if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
+    p.account = userStore.currentAccount
+  }
+  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
+    p.display_currency = userStore.displayCurrency
+  }
+  return p
+}
 
 function fmt(n) {
   return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
@@ -109,6 +122,8 @@ async function load(reset = true) {
     if (status.value) params.status = status.value
     if (year.value) params.year = year.value
     if (market.value) params.market = market.value
+    // v8：账户跟随 + 币种过滤
+    Object.assign(params, filterParams())
     const data = await apiDividends(params)
     list.value = reset ? data.items : [...list.value, ...data.items]
     total.value = data.total
@@ -123,6 +138,8 @@ async function loadSummary() {
   if (status.value) params.status = status.value
   if (year.value) params.year = year.value
   if (market.value) params.market = market.value
+  // v8：账户跟随 + 币种过滤
+  Object.assign(params, filterParams())
   const data = await apiDividends(params)
   netSum.value = data.items
     .filter(d => d.status === 'confirmed')
