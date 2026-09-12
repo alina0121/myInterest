@@ -520,30 +520,31 @@ def enhanced_summary(session: Session, user_id: int,
 # ========== Dashboard Metric Registry ==========
 
 # 所有可选指标定义（前端按此渲染设置页，后端按此计算）
+# key 与 enhanced_summary 返回的字段名一一对应（v8 统一去掉 _cny 后缀）
 DASHBOARD_METRICS = [
     {
-        "key": "forecast_year_cny",
+        "key": "forecast_year",
         "name": "预测年度分红",
         "desc": "未来 12 个月分红预测合计",
         "category": "核心收益",
         "format": "currency",       # currency / percent / number / text
     },
     {
-        "key": "year_received_cny",
+        "key": "year_received",
         "name": "今年已收",
         "desc": "当年已到账分红总额",
         "category": "核心收益",
         "format": "currency",
     },
     {
-        "key": "total_cost_cny",
+        "key": "total_cost",
         "name": "总成本",
         "desc": "各股买入成本 × 数量之和",
         "category": "成本面",
         "format": "currency",
     },
     {
-        "key": "market_value_cny",
+        "key": "market_value",
         "name": "总市值",
         "desc": "最新价 × 数量之和（T-1）",
         "category": "估值面",
@@ -564,21 +565,21 @@ DASHBOARD_METRICS = [
         "format": "percent",
     },
     {
-        "key": "monthly_forecast_cny",
+        "key": "monthly_forecast",
         "name": "月均预测分红",
         "desc": "预测年分红 ÷ 12",
         "category": "时间维度",
         "format": "currency",
     },
     {
-        "key": "daily_forecast_cny",
+        "key": "daily_forecast",
         "name": "日均预测分红",
         "desc": "预测年分红 ÷ 365",
         "category": "时间维度",
         "format": "currency",
     },
     {
-        "key": "floating_pnl_cny",
+        "key": "floating_pnl",
         "name": "浮动盈亏",
         "desc": "总市值 − 总成本（T-1）",
         "category": "盈亏",
@@ -592,14 +593,14 @@ DASHBOARD_METRICS = [
         "format": "percent",
     },
     {
-        "key": "total_received_cny",
+        "key": "total_received",
         "name": "累计收息",
         "desc": "历史已收分红总额（不限年）",
         "category": "累计",
         "format": "currency",
     },
     {
-        "key": "net_investment_cny",
+        "key": "net_investment",
         "name": "净投入",
         "desc": "买入总额 − 卖出总额",
         "category": "成本面",
@@ -616,10 +617,10 @@ DASHBOARD_METRICS = [
 
 # 默认展示的 6 个指标（首次进入时）
 DEFAULT_METRICS = [
-    "forecast_year_cny",   # 主指标
-    "year_received_cny",
-    "total_cost_cny",
-    "market_value_cny",
+    "forecast_year",   # 主指标
+    "year_received",
+    "total_cost",
+    "market_value",
     "yield_on_cost",
     "yield_on_price",
 ]

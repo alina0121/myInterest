@@ -37,7 +37,22 @@ def enhanced_summary(account: str | None = None, display_currency: str | None = 
 @router.get("/dashboard-metrics")
 def dashboard_metrics(session: Session = Depends(get_session),
                       user: User = Depends(get_current_user)):
-    """获取指标注册表 + 用户已选指标列表。"""
+    """获取指标注册表 + 用户已选指标列表。
+    v8 兼容：旧 key 带 _cny 后缀，统一映射到新 key（无后缀）。
+    """
+    # 旧 key → 新 key 映射表（v8 去 _cny 后缀）
+    OLD_KEY_MAP = {
+        "forecast_year_cny": "forecast_year",
+        "year_received_cny": "year_received",
+        "total_cost_cny": "total_cost",
+        "market_value_cny": "market_value",
+        "monthly_forecast_cny": "monthly_forecast",
+        "daily_forecast_cny": "daily_forecast",
+        "floating_pnl_cny": "floating_pnl",
+        "total_received_cny": "total_received",
+        "net_investment_cny": "net_investment",
+    }
+    valid_keys = {m["key"] for m in stats_service.DASHBOARD_METRICS}
     # 读取用户偏好
     setting = session.exec(
         select(UserSetting).where(UserSetting.user_id == user.id)
@@ -45,7 +60,17 @@ def dashboard_metrics(session: Session = Depends(get_session),
     selected = stats_service.get_default_metrics()
     if setting and setting.dashboard_metrics:
         try:
-            selected = json.loads(setting.dashboard_metrics)
+            raw = json.loads(setting.dashboard_metrics)
+            # 兼容旧 key：映射后去重，只保留注册表中存在的 key
+            mapped = [OLD_KEY_MAP.get(k, k) for k in raw]
+            selected = [k for k in mapped if k in valid_keys]
+            if not selected:
+                selected = stats_service.get_default_metrics()
+            # 如果 key 发生了变化，顺手更新数据库
+            if selected != raw:
+                setting.dashboard_metrics = json.dumps(selected, ensure_ascii=False)
+                session.add(setting)
+                session.commit()
         except Exception:
             selected = stats_service.get_default_metrics()
     return ok({
