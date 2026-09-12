@@ -36,7 +36,11 @@
       <view class="form-row">
         <text class="form-label">状态</text>
         <picker :range="['已到账', '预告(待确认)']" @change="e => form.status = e.detail.value === '0' ? 'confirmed' : 'pending'">
-          <view class="picker-val">{{ form.status === 'confirmed' ? '已到账' : '预告(待确认)' }}</view>
+          <view class="picker-val">
+            <text :class="['tag', form.status === 'confirmed' ? 'badge-confirmed' : 'badge-pending']">
+              {{ form.status === 'confirmed' ? '已到账' : '预告(待确认)' }}
+            </text>
+          </view>
         </picker>
       </view>
     </view>
@@ -55,8 +59,8 @@
         <view class="sheet-title">归属计算结果</view>
         <view class="r-row"><text>登记日持仓</text><text class="r-bold">{{ result.shares }} 股</text></view>
         <view class="r-row"><text>税前分红</text><text class="r-bold">{{ sym(result.currency) }}{{ fmt(result.gross_amount) }}</text></view>
-        <view class="r-row"><text>税费</text><text class="text-pending">{{ sym(result.currency) }}{{ fmt(result.tax) }}</text></view>
-        <view class="r-row big"><text>税后到账</text><text class="text-income big">{{ sym(result.currency) }}{{ fmt(result.net_amount) }}</text></view>
+        <view class="r-row"><text>税费</text><text class="text-amber">{{ sym(result.currency) }}{{ fmt(result.tax) }}</text></view>
+        <view class="r-row big"><text>税后到账</text><text class="text-emerald big">{{ sym(result.currency) }}{{ fmt(result.net_amount) }}</text></view>
         <view class="r-row" v-if="result.record_date_auto">
           <text class="text-muted">登记日为自动推断（A股=除权日前一天），如与实际不符可编辑修改</text>
         </view>

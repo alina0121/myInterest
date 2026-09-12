@@ -3,7 +3,7 @@
     <!-- 持仓头部 -->
     <view class="hero">
       <view class="hero-top">
-        <text class="tag" :style="{ background: marketMap[h.market]?.color }">{{ marketMap[h.market]?.label }}</text>
+        <text :class="['tag', badgeClass(h.market)]">{{ marketMap[h.market]?.label }}</text>
         <text class="hero-name">{{ h.name }}</text>
         <text class="hero-code">{{ h.code }}</text>
       </view>
@@ -17,35 +17,41 @@
           <view class="hs-label">平均成本</view>
         </view>
         <view class="hs-cell">
-          <view class="hs-val">{{ (h.yoc_ttm * 100).toFixed(2) }}%</view>
+          <view class="hs-val">{{ ((h.yoc_ttm || 0) * 100).toFixed(2) }}%</view>
           <view class="hs-label">TTM成本股息率</view>
         </view>
         <view class="hs-cell">
-          <view class="hs-val">¥{{ fmt(h.year_dividend) }}</view>
+          <view class="hs-val">¥{{ fmt(h.year_dividend_cny || h.year_dividend) }}</view>
           <view class="hs-label">今年分红</view>
         </view>
       </view>
+    </view>
+
+    <!-- 提示 -->
+    <view class="hint-box">
+      💡 分红按股权登记日当天持有的批次计算：买入日期晚于除权除息日的批次，不参与当次分红。每笔分红的批次归属明细见「分红记录」。
     </view>
 
     <!-- Tab 切换 -->
     <view class="tabs">
       <view :class="['tab', tab === 'lots' ? 'on' : '']" @click="tab = 'lots'">买入批次 ({{ lots.length }})</view>
       <view :class="['tab', tab === 'divs' ? 'on' : '']" @click="tab = 'divs'">分红记录 ({{ divs.length }})</view>
+      <view :class="['tab', tab === 'yearly' ? 'on' : '']" @click="tab = 'yearly'">年度 ({{ yearly.length }})</view>
     </view>
 
     <!-- 批次列表 -->
     <block v-if="tab === 'lots'">
       <view v-for="l in lots" :key="l.id" class="card lot-card">
         <view class="lot-head">
-          <text class="tag" :style="{ background: directionMap[l.direction]?.color }">{{ directionMap[l.direction]?.label }}</text>
+          <text class="tag" :style="{ background: directionMap[l.direction]?.color, color: '#fff' }">{{ directionMap[l.direction]?.label }}</text>
           <text class="lot-date">{{ l.trade_date }}</text>
-          <text class="lot-amt" :class="l.direction === 'sell' ? 'text-income' : ''">{{ sym(h.currency) }}{{ fmt(l.amount) }}</text>
+          <text class="lot-amt" :class="l.direction === 'sell' ? 'text-emerald' : ''">{{ sym(h.currency) }}{{ fmt(l.amount) }}</text>
         </view>
         <view class="lot-grid">
           <text>{{ l.shares }} 股</text>
           <text>单价 {{ sym(h.currency) }}{{ fmt(l.price) }}</text>
           <text v-if="l.direction === 'buy'">费用 {{ sym(h.currency) }}{{ fmt(l.fee) }}</text>
-          <text v-if="l.lot_dividend > 0" class="text-income">累计收息 ¥{{ fmt(l.lot_dividend) }}</text>
+          <text v-if="l.lot_dividend > 0" class="text-emerald">累计收息 ¥{{ fmt(l.lot_dividend) }}</text>
         </view>
       </view>
       <view style="padding: 10rpx 24rpx">
@@ -59,7 +65,7 @@
       <view v-for="d in divs" :key="d.id" class="card div-card" @click="toggle(d.id)">
         <view class="div-head">
           <text class="div-date">{{ d.pay_date }} 派息</text>
-          <text class="tag" :style="{ background: d.status === 'confirmed' ? '#16a34a' : '#f59e0b' }">
+          <text :class="['tag', d.status === 'confirmed' ? 'badge-confirmed' : 'badge-pending']">
             {{ d.status === 'confirmed' ? '已到账' : '预告' }}
           </text>
         </view>
@@ -67,8 +73,8 @@
           <text>每股 {{ sym(d.currency) }}{{ fmt(d.dps) }}</text>
           <text>参与 {{ d.shares }} 股</text>
           <text>税前 {{ sym(d.currency) }}{{ fmt(d.gross_amount) }}</text>
-          <text class="text-pending" v-if="d.tax > 0">税 {{ sym(d.currency) }}{{ fmt(d.tax) }}</text>
-          <text class="text-income">到账 {{ sym(d.currency) }}{{ fmt(d.net_amount) }}</text>
+          <text class="text-amber" v-if="d.tax > 0">税 {{ sym(d.currency) }}{{ fmt(d.tax) }}</text>
+          <text class="text-emerald">到账 {{ sym(d.currency) }}{{ fmt(d.net_amount) }}</text>
         </view>
         <!-- 批次归属明细 -->
         <view v-if="openId === d.id && d.allocations && d.allocations.length" class="alloc">
@@ -76,12 +82,21 @@
           <view v-for="(a, i) in d.allocations" :key="i" class="alloc-row">
             <text>{{ a.lot_date }} 买入的批次</text>
             <text>{{ a.shares }} 股</text>
-            <text class="text-income">{{ sym(d.currency) }}{{ fmt(a.net) }}</text>
+            <text class="text-emerald">{{ sym(d.currency) }}{{ fmt(a.net) }}</text>
           </view>
         </view>
         <view v-else-if="openId === d.id" class="alloc">
           <view class="alloc-title text-muted">暂无归属明细</view>
         </view>
+      </view>
+    </block>
+
+    <!-- 年度统计 -->
+    <block v-if="tab === 'yearly'">
+      <view v-if="!yearly.length" class="empty card">暂无年度数据</view>
+      <view v-for="y in yearly" :key="y.year" class="card year-card">
+        <text class="year-label">{{ y.year }} 年</text>
+        <text class="year-amt text-emerald">¥{{ fmt(y.net_cny) }}</text>
       </view>
     </block>
 
@@ -122,11 +137,12 @@
 <script setup>
 import { computed, reactive, ref } from 'vue'
 import { onLoad, onShow } from '@dcloudio/uni-app'
-import { apiHoldingDetail, apiLots, apiDividends, apiCreateLot } from '@/api'
-import { marketMap, currencyMap, directionMap, DIRECTIONS as DIRS } from '@/utils/constants'
+import { apiHoldingDetail, apiLots, apiDividends, apiCreateLot, apiHoldingStats } from '@/api'
+import { marketMap, currencyMap, directionMap, DIRECTIONS as DIRS, badgeClass } from '@/utils/constants'
 
 const id = ref(null)
 const h = ref({})
+const st = ref({})
 const lots = ref([])
 const divs = ref([])
 const tab = ref('lots')
@@ -139,6 +155,9 @@ const lotForm = reactive({ trade_date: today, direction: 'buy', shares: '', pric
 const dirLabels = DIRS.map(d => d.label)
 const dirLabel = computed(() => DIRS.find(d => d.value === lotForm.direction)?.label)
 
+// 年度聚合分红：来自 apiHoldingStats(id) 返回的 yearly 数组
+const yearly = computed(() => st.value.yearly || [])
+
 function fmt(n) {
   return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 })
 }
@@ -146,10 +165,12 @@ function sym(c) { return currencyMap[c]?.symbol || '' }
 
 async function load() {
   h.value = await apiHoldingDetail(id.value)
-  const [l, d] = await Promise.all([
+  const [s, l, d] = await Promise.all([
+    apiHoldingStats(id.value),
     apiLots(id.value),
     apiDividends({ holding_id: id.value, page_size: 50, expand: 'allocations' }),
   ])
+  st.value = s
   lots.value = l.items
   divs.value = d.items
 }
@@ -186,19 +207,28 @@ async function saveLot() {
 
 <style scoped>
 .hero {
-  background: linear-gradient(135deg, #1668dc, #3b82f6);
-  margin: 20rpx 24rpx; border-radius: 20rpx; padding: 30rpx; color: #fff;
+  background: linear-gradient(135deg, #1e3a8a, #3b82f6);
+  margin: 20rpx 24rpx; border-radius: 24rpx; padding: 30rpx; color: #fff;
+  box-shadow: 0 4rpx 12rpx rgba(30, 58, 138, 0.18);
 }
 .hero-top { display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap; }
 .hero-name { font-size: 36rpx; font-weight: 700; }
-.hero-code { font-size: 24rpx; opacity: 0.8; }
+.hero-code { font-size: 24rpx; opacity: 0.85; }
 .hero-stats { display: flex; margin-top: 30rpx; }
 .hs-cell { flex: 1; }
 .hs-val { font-size: 30rpx; font-weight: 700; }
-.hs-label { font-size: 20rpx; opacity: 0.8; margin-top: 8rpx; }
-.tabs { display: flex; background: #fff; margin: 0 24rpx; border-radius: 16rpx; overflow: hidden; }
+.hs-label { font-size: 20rpx; opacity: 0.85; margin-top: 8rpx; }
+.hint-box {
+  margin: 0 24rpx 20rpx; padding: 18rpx 22rpx; font-size: 22rpx; line-height: 1.6;
+  color: #b45309; background: #fffbeb; border: 1rpx solid #fde68a;
+  border-radius: 16rpx;
+}
+.tabs {
+  display: flex; background: #fff; margin: 0 24rpx; border-radius: 16rpx;
+  overflow: hidden; box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.06);
+}
 .tab { flex: 1; text-align: center; padding: 26rpx 0; font-size: 28rpx; color: #64748b; }
-.tab.on { color: #1668dc; font-weight: 600; border-bottom: 4rpx solid #1668dc; }
+.tab.on { color: #1e3a8a; font-weight: 600; border-bottom: 4rpx solid #1e3a8a; }
 .lot-card { padding: 24rpx 28rpx; }
 .lot-head { display: flex; align-items: center; gap: 16rpx; }
 .lot-date { font-size: 26rpx; color: #475569; flex: 1; }
@@ -211,8 +241,11 @@ async function saveLot() {
 .alloc { margin-top: 18rpx; background: #f8fafc; border-radius: 12rpx; padding: 18rpx 20rpx; }
 .alloc-title { font-size: 24rpx; font-weight: 600; color: #475569; margin-bottom: 10rpx; }
 .alloc-row { display: flex; justify-content: space-between; font-size: 24rpx; color: #64748b; padding: 6rpx 0; }
+.year-card { display: flex; justify-content: space-between; align-items: center; padding: 26rpx 28rpx; }
+.year-label { font-size: 30rpx; font-weight: 600; color: #1e293b; }
+.year-amt { font-size: 32rpx; font-weight: 700; }
 .mask {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.45); z-index: 99;
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); z-index: 99;
   display: flex; align-items: flex-end;
 }
 .sheet {
@@ -221,4 +254,13 @@ async function saveLot() {
 }
 .sheet-title { font-size: 32rpx; font-weight: 700; text-align: center; margin-bottom: 10rpx; }
 .picker-val { text-align: right; font-size: 28rpx; }
+
+/* #ifdef H5 */
+@media (min-width: 768px) {
+  .page { padding: 32rpx 48rpx 60rpx; }
+  .hero { margin: 0 0 24rpx; }
+  .hint-box { margin: 0 0 24rpx; }
+  .tabs { margin: 0 0 24rpx; }
+}
+/* #endif */
 </style>

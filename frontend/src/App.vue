@@ -3,12 +3,10 @@ import { TOKEN_KEY } from './utils/config'
 
 export default {
   onLaunch() {
-    // 未登录且不在登录页 → 跳登录页
     const token = uni.getStorageSync(TOKEN_KEY)
     if (!token) {
       uni.reLaunch({ url: '/pages/login/login' })
     }
-    // H5 桌面端隐藏原生 TabBar，改用侧边栏导航
     // #ifdef H5
     if (window.innerWidth >= 768) {
       setTimeout(() => uni.hideTabBar({ animation: false }), 200)
@@ -26,15 +24,14 @@ export default {
 </script>
 
 <style>
-/* 全局样式（三端通用，rpx 自适应） */
+/* 全局样式（三端通用，对齐 PC 端设计语言） */
 page {
-  background: #f3f6fb;
+  background: #f8fafc;
   font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
   color: #1e293b;
   font-size: 28rpx;
 }
 
-/* H5 桌面端隐藏原生 TabBar，改用侧边栏导航 */
 /* #ifdef H5 */
 @media (min-width: 768px) {
   uni-tabbar { display: none !important; }
@@ -43,14 +40,14 @@ page {
 
 .card {
   background: #fff;
-  border-radius: 20rpx;
-  padding: 28rpx;
-  margin: 20rpx 24rpx;
-  box-shadow: 0 4rpx 16rpx rgba(22, 104, 220, 0.06);
+  border-radius: 24rpx;
+  padding: 40rpx;
+  margin: 24rpx;
+  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.06);
 }
 
 .btn-primary {
-  background: linear-gradient(135deg, #1668dc, #3b82f6);
+  background: #1e3a8a;
   color: #fff;
   border-radius: 44rpx;
   font-size: 30rpx;
@@ -72,17 +69,29 @@ page {
 }
 .btn-ghost::after { border: none; }
 
+/* 市场徽章：浅底深字风格（对齐 PC global.css） */
 .tag {
   display: inline-block;
   font-size: 20rpx;
-  padding: 4rpx 14rpx;
+  padding: 4rpx 16rpx;
   border-radius: 8rpx;
-  color: #fff;
   line-height: 1.6;
+  font-weight: 500;
 }
+.tag-a { background: #fef2f2; color: #dc2626; }
+.tag-us { background: #eff6ff; color: #2563eb; }
+.tag-hk { background: #ecfdf5; color: #059669; }
+.tag-fund { background: #fffbeb; color: #d97706; }
+.tag-bond { background: #f5f3ff; color: #7c3aed; }
+
+/* 状态徽章 */
+.badge-confirmed { background: #ecfdf5; color: #059669; }
+.badge-pending { background: #fffbeb; color: #d97706; }
 
 .text-muted { color: #94a3b8; font-size: 24rpx; }
-.text-income { color: #16a34a; font-weight: 600; }
+.text-emerald { color: #059669; font-weight: 600; }
+.text-amber { color: #d97706; font-weight: 600; }
+.text-income { color: #059669; font-weight: 600; }
 .text-pending { color: #d97706; font-weight: 600; }
 
 .section-title {

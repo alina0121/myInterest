@@ -1,9 +1,9 @@
 <template>
   <view class="login-page">
     <view class="hero">
-      <view class="logo">息</view>
-      <view class="brand">息计</view>
-      <view class="slogan">记录每一笔分红，看见复利的力量</view>
+      <view class="logo">攒</view>
+      <view class="brand">攒息</view>
+      <view class="slogan">时间的朋友 · 记录每一笔分红</view>
     </view>
 
     <view class="login-card">
@@ -126,7 +126,7 @@ async function onWxLogin() {
 </script>
 
 <style scoped>
-.login-page { min-height: 100vh; background: linear-gradient(180deg, #1668dc 0%, #3b82f6 42%, #f3f6fb 42%); }
+.login-page { min-height: 100vh; background: linear-gradient(180deg, #1e3a8a 0%, #3b82f6 42%, #f8fafc 42%); }
 .hero { text-align: center; padding: 110rpx 0 70rpx; color: #fff; }
 .logo {
   width: 120rpx; height: 120rpx; line-height: 120rpx; margin: 0 auto;
@@ -137,17 +137,17 @@ async function onWxLogin() {
 .slogan { font-size: 26rpx; opacity: 0.85; margin-top: 12rpx; }
 .login-card {
   background: #fff; border-radius: 28rpx; margin: 0 40rpx;
-  padding: 20rpx 40rpx 50rpx; box-shadow: 0 12rpx 40rpx rgba(22,104,220,0.12);
+  padding: 20rpx 40rpx 50rpx; box-shadow: 0 12rpx 40rpx rgba(30,58,138,0.12);
 }
 .tabs { display: flex; border-bottom: 1rpx solid #f1f5f9; }
 .tab {
   flex: 1; text-align: center; padding: 30rpx 0; font-size: 30rpx;
   color: #94a3b8; position: relative;
 }
-.tab.active { color: #1668dc; font-weight: 600; }
+.tab.active { color: #1e3a8a; font-weight: 600; }
 .tab.active::after {
   content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 60rpx; height: 6rpx; border-radius: 3rpx; background: #1668dc;
+  width: 60rpx; height: 6rpx; border-radius: 3rpx; background: #1e3a8a;
 }
 .field { padding: 26rpx 0; border-bottom: 1rpx solid #f1f5f9; }
 .f-label { display: block; font-size: 24rpx; color: #94a3b8; margin-bottom: 12rpx; }
@@ -170,5 +170,5 @@ async function onWxLogin() {
 .btn-wx::after { border: none; }
 .wx-icon { margin-right: 10rpx; font-size: 32rpx; }
 .hint { text-align: center; margin-top: 28rpx; font-size: 26rpx; color: #94a3b8; }
-.link { color: #1668dc; }
+.link { color: #1e3a8a; }
 </style>

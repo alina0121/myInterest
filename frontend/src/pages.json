@@ -9,6 +9,10 @@
       "style": { "navigationBarTitleText": "我的持仓" }
     },
     {
+      "path": "pages/record/record",
+      "style": { "navigationBarTitleText": "记分红" }
+    },
+    {
       "path": "pages/calendar/calendar",
       "style": { "navigationBarTitleText": "分红日历" }
     },
@@ -43,21 +47,22 @@
   ],
   "tabBar": {
     "color": "#94a3b8",
-    "selectedColor": "#1668dc",
+    "selectedColor": "#1e3a8a",
     "backgroundColor": "#ffffff",
     "borderStyle": "white",
     "list": [
       { "pagePath": "pages/index/index", "text": "总览" },
       { "pagePath": "pages/holdings/holdings", "text": "持仓" },
+      { "pagePath": "pages/record/record", "text": "记分红" },
       { "pagePath": "pages/calendar/calendar", "text": "日历" },
       { "pagePath": "pages/mine/mine", "text": "我的" }
     ]
   },
   "globalStyle": {
     "navigationBarTextStyle": "white",
-    "navigationBarTitleText": "息计",
-    "navigationBarBackgroundColor": "#1668dc",
-    "backgroundColor": "#f3f6fb",
+    "navigationBarTitleText": "攒息",
+    "navigationBarBackgroundColor": "#1e3a8a",
+    "backgroundColor": "#f8fafc",
     "backgroundTextStyle": "dark"
   }
 }

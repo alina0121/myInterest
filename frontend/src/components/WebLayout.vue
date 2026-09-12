@@ -1,14 +1,13 @@
 <template>
-  <!-- 仅 H5 端 ≥768px 渲染侧边栏 + 顶部栏；移动端保持原生 TabBar -->
+  <!-- 仅 H5 端 ≥768px 渲染顶部导航；移动端保持原生 TabBar -->
   <!-- #ifdef H5 -->
-  <view v-if="showDesktop" class="web-shell">
-    <!-- 左侧边栏 -->
-    <aside class="web-sidebar">
-      <view class="brand">
-        <view class="logo">息</view>
-        <view>
-          <view class="brand-name">息计</view>
-          <view class="brand-sub">分红记录助手</view>
+  <view v-if="showDesktop" class="web-topbar">
+    <view class="topbar-left">
+      <view class="brand" @click="go('/pages/index/index')">
+        <view class="logo">攒</view>
+        <view class="brand-text">
+          <view class="brand-name">攒息</view>
+          <view class="brand-sub">时间的朋友</view>
         </view>
       </view>
       <nav class="nav">
@@ -16,29 +15,17 @@
               :class="['nav-item', current === item.path ? 'active' : '']"
               @click="go(item.path)">
           <text class="nav-icon">{{ item.icon }}</text>
-          <text class="nav-label">{{ item.label }}</text>
+          <text>{{ item.label }}</text>
         </view>
       </nav>
-      <view class="sidebar-foot">v1.0.0 · 桌面版</view>
-    </aside>
-
-    <!-- 顶部栏 -->
-    <header class="web-header">
-      <view class="hdr-left">
-        <view class="page-title">{{ title }}</view>
-        <view class="page-sub">{{ subtitle }}</view>
+    </view>
+    <view class="topbar-right">
+      <slot name="actions" />
+      <view class="user-box" @click="goMine">
+        <view class="avatar">{{ avatarText }}</view>
+        <view class="user-name">{{ nickname }}</view>
       </view>
-      <view class="hdr-right">
-        <slot name="actions" />
-        <view class="user-box" @click="goMine">
-          <view class="avatar">{{ avatarText }}</view>
-          <view class="user-info">
-            <view class="user-name">{{ nickname }}</view>
-            <view class="user-logout">退出登录 →</view>
-          </view>
-        </view>
-      </view>
-    </header>
+    </view>
   </view>
   <!-- #endif -->
 </template>
@@ -48,9 +35,9 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { userStore } from '@/store/user'
 
-const props = defineProps({
-  title: { type: String, default: '总览看板' },
-  subtitle: { type: String, default: '记录每一笔分红，见证复利的力量' },
+defineProps({
+  title: { type: String, default: '' },
+  subtitle: { type: String, default: '' },
 })
 
 const showDesktop = ref(false)
@@ -108,42 +95,42 @@ onShow(() => {
 </script>
 
 <style>
-/* H5 桌面布局：侧边栏 fixed + 顶部栏 fixed，页面内容靠 padding 让位 */
 /* #ifdef H5 */
-.web-shell { position: fixed; top: 0; left: 0; right: 0; bottom: 0; pointer-events: none; z-index: 999; }
-.web-shell > * { pointer-events: auto; }
-.web-sidebar {
-  position: fixed; left: 0; top: 0; bottom: 0; width: 224px;
-  background: #fff; border-right: 1rpx solid #e2e8f0;
-  display: flex; flex-direction: column;
+.web-topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 60px; z-index: 999;
+  background: #fff; border-bottom: 1px solid #e2e8f0;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 28px; box-shadow: 0 1px 2px rgba(0,0,0,0.03);
 }
-.brand { display: flex; align-items: center; gap: 16rpx; padding: 32rpx; border-bottom: 1rpx solid #f1f5f9; }
-.logo { width: 56rpx; height: 56rpx; border-radius: 12rpx; background: #1e3a8a; color: #fff; font-weight: 700; font-size: 32rpx; display: flex; align-items: center; justify-content: center; }
-.brand-name { font-weight: 700; color: #1e293b; font-size: 30rpx; }
-.brand-sub { font-size: 20rpx; color: #94a3b8; }
-.nav { flex: 1; padding: 20rpx; }
-.nav-item { display: flex; align-items: center; gap: 18rpx; padding: 20rpx 24rpx; border-radius: 12rpx; color: #64748b; font-size: 28rpx; margin-bottom: 6rpx; cursor: pointer; }
-.nav-item:hover { background: #f8fafc; }
+.topbar-left { display: flex; align-items: center; gap: 32px; }
+.brand { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.logo {
+  width: 34px; height: 34px; border-radius: 8px; background: #1e3a8a;
+  color: #fff; font-weight: 700; font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+}
+.brand-text { line-height: 1.2; }
+.brand-name { font-weight: 700; font-size: 16px; color: #1e3a8a; letter-spacing: 1px; }
+.brand-sub { font-size: 11px; color: #94a3b8; }
+.nav { display: flex; align-items: center; gap: 4px; }
+.nav-item {
+  display: flex; align-items: center; gap: 6px; padding: 8px 14px;
+  border-radius: 8px; color: #64748b; font-size: 14px; cursor: pointer;
+  transition: all 0.15s; white-space: nowrap;
+}
+.nav-item:hover { background: #f1f5f9; color: #1e3a8a; }
 .nav-item.active { background: #1e3a8a; color: #fff; }
-.nav-icon { font-size: 32rpx; }
-.sidebar-foot { padding: 24rpx; font-size: 20rpx; color: #cbd5e1; border-top: 1rpx solid #f1f5f9; }
-.web-header {
-  position: fixed; top: 0; left: 224px; right: 0; height: 80px;
-  background: #fff; border-bottom: 1rpx solid #e2e8f0;
-  display: flex; align-items: center; justify-content: space-between; padding: 0 40rpx;
+.nav-icon { font-size: 16px; }
+.topbar-right { display: flex; align-items: center; gap: 16px; }
+.user-box { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.avatar {
+  width: 34px; height: 34px; border-radius: 50%; background: #dbeafe;
+  color: #1e3a8a; font-weight: 600; display: flex; align-items: center; justify-content: center;
 }
-.hdr-left .page-title { font-size: 34rpx; font-weight: 700; color: #1e293b; }
-.hdr-left .page-sub { font-size: 24rpx; color: #94a3b8; margin-top: 4rpx; }
-.hdr-right { display: flex; align-items: center; gap: 24rpx; }
-.user-box { display: flex; align-items: center; gap: 16rpx; cursor: pointer; }
-.avatar { width: 64rpx; height: 64rpx; border-radius: 50%; background: #dbeafe; color: #1e3a8a; font-weight: 600; display: flex; align-items: center; justify-content: center; }
-.user-info .user-name { font-size: 26rpx; font-weight: 500; color: #475569; }
-.user-info .user-logout { font-size: 20rpx; color: #94a3b8; }
-.user-box:hover .user-logout { color: #ef4444; }
-/* 页面内容让位：H5 桌面端 */
+.user-name { font-size: 14px; font-weight: 500; }
+
 @media (min-width: 768px) {
-  page { padding-left: 224px; padding-top: 80px; }
-  /* 隐藏原生 TabBar，改用侧边栏导航 */
+  page { padding-top: 60px; }
   uni-tabbar, .uni-tabbar, uni-tabbar + view { display: none !important; }
 }
 /* #endif */

@@ -1,10 +1,10 @@
-/** 字典常量：市场 / 币种 / 派息频率 / 方向 / 状态 的展示映射 */
+/** 字典常量：市场 / 币种 / 派息频率 / 方向 / 状态 的展示映射（对齐 PC 端） */
 export const MARKETS = [
-  { value: 'a_share', label: 'A股', color: '#e5484d' },
-  { value: 'us_stock', label: '美股', color: '#1668dc' },
-  { value: 'hk_stock', label: '港股', color: '#7c3aed' },
-  { value: 'fund', label: '基金', color: '#0891b2' },
-  { value: 'bond', label: '债券', color: '#b45309' },
+  { value: 'a_share', label: 'A股', color: '#dc2626', pastel: '#fef2f2' },
+  { value: 'us_stock', label: '美股', color: '#2563eb', pastel: '#eff6ff' },
+  { value: 'hk_stock', label: '港股', color: '#059669', pastel: '#ecfdf5' },
+  { value: 'fund', label: '基金', color: '#d97706', pastel: '#fffbeb' },
+  { value: 'bond', label: '债券', color: '#7c3aed', pastel: '#f5f3ff' },
 ]
 
 export const CURRENCIES = [
@@ -23,9 +23,9 @@ export const FREQS = [
 ]
 
 export const DIRECTIONS = [
-  { value: 'buy', label: '买入', color: '#e5484d' },
-  { value: 'sell', label: '卖出', color: '#16a34a' },
-  { value: 'bonus_share', label: '送转', color: '#b45309' },
+  { value: 'buy', label: '买入', color: '#dc2626' },
+  { value: 'sell', label: '卖出', color: '#059669' },
+  { value: 'bonus_share', label: '送转', color: '#d97706' },
 ]
 
 export const marketMap = Object.fromEntries(MARKETS.map(m => [m.value, m]))
@@ -33,7 +33,30 @@ export const currencyMap = Object.fromEntries(CURRENCIES.map(c => [c.value, c]))
 export const freqMap = Object.fromEntries(FREQS.map(f => [f.value, f.label]))
 export const directionMap = Object.fromEntries(DIRECTIONS.map(d => [d.value, d]))
 
-/** 金额格式化：¥1,676.00 */
+/** 市场徽章 class（浅底深字风格，对齐 PC global.css） */
+export function badgeClass(market) {
+  const map = {
+    a_share: 'tag-a',
+    us_stock: 'tag-us',
+    hk_stock: 'tag-hk',
+    fund: 'tag-fund',
+    bond: 'tag-bond',
+  }
+  return map[market] || 'tag-a'
+}
+
+/** 金额格式化 */
+export function fmt(n, digits = 2) {
+  return Number(n || 0).toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  })
+}
+
+export function fmtCNY(n) {
+  return '¥ ' + fmt(n)
+}
+
 export function fmtMoney(n, symbol = '') {
   if (n === null || n === undefined || isNaN(n)) return symbol + '0.00'
   const v = Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -41,7 +64,7 @@ export function fmtMoney(n, symbol = '') {
 }
 
 export function cny(n) {
-  return '¥' + fmtMoney(n)
+  return '¥' + fmt(n)
 }
 
 export function moneyWith(cur, n) {
