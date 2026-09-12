@@ -29,10 +29,10 @@
             </template>
           </el-table-column>
           <el-table-column label="市值" width="120" align="right">
-            <template #default="{ row }">{{ fmtDisplay(row.market_value, row.display_currency) }}</template>
+            <template #default="{ row }">{{ fmtDisplay(row.market_value, 'ORIGINAL', row.currency) }}</template>
           </el-table-column>
           <el-table-column label="年分红" width="110" align="right">
-            <template #default="{ row }">{{ fmtDisplay(row.year_dividend, row.display_currency) }}</template>
+            <template #default="{ row }">{{ fmtDisplay(row.year_dividend, 'ORIGINAL', row.currency) }}</template>
           </el-table-column>
           <el-table-column label="股息率(现价)" width="120" align="right">
             <template #default="{ row }">
@@ -68,7 +68,7 @@
 <script setup>
 import { onMounted, onUnmounted, ref } from 'vue'
 import { apiMonthlyTrend, apiByMarket, apiTopHoldings, apiYieldRanking, apiHoldings } from '../api'
-import { fmtDisplay, marketMap, freqMap, currencyMap } from '../utils/constants'
+import { fmtDisplay, moneyWith, marketMap, freqMap } from '../utils/constants'
 import { useEchart } from '../utils/echart'
 import { useUserStore } from '../store/user'
 
@@ -103,9 +103,8 @@ onMounted(async () => {
     apiYieldRanking(params), apiHoldings(params),
   ])
 
-  // 后端返回 display_currency=CNY（不传 display_currency 时默认）
-  const dispCur = trend.display_currency || market.display_currency || 'CNY'
-  const sym = currencyMap[dispCur]?.symbol || '¥'
+  // 后端月度趋势默认返回 display_currency=CNY（年度/趋势图跨市场聚合按人民币）
+  const dispCur = trend.display_currency || 'CNY'
 
   // 年度聚合
   const yearMap = {}
@@ -127,31 +126,53 @@ onMounted(async () => {
   yc.render()
 
   // 各市场累计分红（横向条形，更接近原型 bar 形态）
+  // v9：条形金额按原币种显示（美股 $、港股 HK$、A股/基金 ¥），tooltip/label 用各自币种符号
   const mItems = (market.items || [])
 
   marketOpt.value = {
-    tooltip: { trigger: 'axis', formatter: `{b}: ${sym}{c}` },
-    grid: { left: 80, right: 30, top: 20, bottom: 30 },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (ps) => {
+        const p = Array.isArray(ps) ? ps[0] : ps
+        const m = mItems[p.dataIndex] || {}
+        return `${marketMap[m.market]?.label || m.market}: ${moneyWith(m.currency, p.value)}`
+      },
+    },
+    grid: { left: 80, right: 60, top: 20, bottom: 30 },
     xAxis: { type: 'value' },
     yAxis: { type: 'category', data: mItems.map((m) => marketMap[m.market]?.label || m.market) },
     series: [{
       type: 'bar', data: mItems.map((m) => Number((m.amount || 0).toFixed(2))), barMaxWidth: 24,
       itemStyle: { color: '#3b82f6', borderRadius: [0, 6, 6, 0] },
-      label: { show: true, position: 'right', formatter: `${sym}{c}` },
+      label: {
+        show: true, position: 'right',
+        formatter: (p) => moneyWith((mItems[p.dataIndex] || {}).currency, p.value),
+      },
     }],
   }
   mc.render()
 
-  // Top10 横向条形
+  // Top10 横向条形（v9：排序由后端按 CNY 折算口径完成，显示金额按原币种）
   const tops = (top.items || []).slice(0, 10).reverse()
   topOpt.value = {
-    tooltip: { trigger: 'axis', formatter: `{b}: ${sym}{c}` },
-    grid: { left: 110, right: 40, top: 10, bottom: 30 },
+    tooltip: {
+      trigger: 'axis',
+      formatter: (ps) => {
+        const p = Array.isArray(ps) ? ps[0] : ps
+        const t = tops[p.dataIndex] || {}
+        return `${t.name}: ${moneyWith(t.currency, p.value)}`
+      },
+    },
+    grid: { left: 110, right: 60, top: 10, bottom: 30 },
     xAxis: { type: 'value' },
     yAxis: { type: 'category', data: tops.map((t) => t.name), axisLabel: { fontSize: 12 } },
     series: [{
       type: 'bar', data: tops.map((t) => Number(t.amount)), barMaxWidth: 18,
       itemStyle: { color: '#3b82f6', borderRadius: [0, 6, 6, 0] },
+      label: {
+        show: true, position: 'right',
+        formatter: (p) => moneyWith((tops[p.dataIndex] || {}).currency, p.value),
+      },
     }],
   }
   tc.render()

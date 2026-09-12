@@ -36,9 +36,9 @@
             </view>
             <view class="mkt-bar">
               <view class="mkt-fill"
-                    :style="{ width: mktPct(m.amount) + '%', background: marketColor(m.market) }"></view>
+                    :style="{ width: mktPct(m.amount_cny) + '%', background: marketColor(m.market) }"></view>
             </view>
-            <view class="mkt-amt">¥{{ fmt(m.amount) }}</view>
+            <view class="mkt-amt">{{ moneyWith(m.currency, m.amount) }}</view>
           </view>
         </view>
       </view>
@@ -64,8 +64,8 @@
         <view class="top-name">
           <view class="tn-main">{{ h.name }}</view>
         </view>
-        <view class="top-bar"><view class="top-fill" :style="{ width: topPct(h.amount) + '%' }"></view></view>
-        <view class="top-amt text-emerald">¥{{ fmt(h.amount) }}</view>
+        <view class="top-bar"><view class="top-fill" :style="{ width: topPct(h.amount_cny) + '%' }"></view></view>
+        <view class="top-amt text-emerald">{{ moneyWith(h.currency, h.amount) }}</view>
       </view>
     </view>
 
@@ -119,7 +119,7 @@
         </view>
         <view class="tr" v-for="h in yieldList" :key="h.holding_id">
           <view class="td">{{ h.name }}</view>
-          <view class="td ar">¥{{ fmt(h.year_dividend) }}</view>
+          <view class="td ar">{{ moneyWith(h.currency, h.year_dividend) }}</view>
           <view class="td ar text-emerald">{{ (h.yoc_ttm * 100).toFixed(2) }}%</view>
           <view class="td ar">{{ h.yield_price ? (h.yield_price * 100).toFixed(2) + '%' : '—' }}</view>
         </view>
@@ -134,7 +134,7 @@
 import { computed, ref } from 'vue'
 import { onShow } from '@dcloudio/uni-app'
 import { apiByMarket, apiTopHoldings, apiYieldRanking, apiMonthlyTrend, apiForecast } from '@/api'
-import { MARKETS, marketMap, currencyMap, badgeClass } from '@/utils/constants'
+import { MARKETS, marketMap, currencyMap, badgeClass, moneyWith } from '@/utils/constants'
 import { userStore } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
 
@@ -144,7 +144,7 @@ const topList = ref([])
 const yieldList = ref([])
 const forecast = ref({ months: [], amounts: [] })
 
-/** v8：账户跟随（币种转换仅在总览页生效，统计页按 CNY 显示） */
+/** v8：账户跟随（币种转换仅在总览页生效，统计页各市场/持仓按原币种显示） */
 function filterParams() {
   const p = {}
   if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
@@ -161,12 +161,13 @@ function ybHeight(v) {
   const max = Math.max(...yearList.value.map(y => y.total || 0), 1)
   return Math.max(8, Math.round((v / max) * 200))
 }
+// v9：条形占比用折算 CNY（跨币种可比），显示金额用原币种
 function topPct(v) {
-  const max = topList.value[0]?.amount || 1
+  const max = topList.value[0]?.amount_cny || 1
   return Math.round((v / max) * 100)
 }
 function mktPct(v) {
-  const max = Math.max(...marketList.value.map(m => m.amount || 0), 1)
+  const max = Math.max(...marketList.value.map(m => m.amount_cny || 0), 1)
   return Math.round((v / max) * 100)
 }
 function fbHeight(v) {
@@ -177,8 +178,9 @@ function marketColor(market) {
   return marketMap[market]?.color || '#3b82f6'
 }
 
+// v9：圆环中心总额用后端折算 CNY（各市场原币种金额不可直接相加）
 const marketTotal = computed(() =>
-  marketList.value.reduce((s, m) => s + Number(m.amount || 0), 0)
+  marketList.value.reduce((s, m) => s + Number(m.amount_cny || 0), 0)
 )
 
 const donutGradient = computed(() => {
@@ -187,7 +189,7 @@ const donutGradient = computed(() => {
   let acc = 0
   const segs = []
   marketList.value.forEach(m => {
-    const pct = (Number(m.amount || 0) / total) * 100
+    const pct = (Number(m.amount_cny || 0) / total) * 100
     if (pct <= 0) return
     const color = marketColor(m.market)
     segs.push(`${color} ${acc.toFixed(2)}% ${(acc + pct).toFixed(2)}%`)

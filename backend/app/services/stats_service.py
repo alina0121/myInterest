@@ -1,5 +1,6 @@
 """统计服务：看板/趋势/市场占比/预测/排行（docs/03 §5、§6，docs/04 §六）。"""
 import json
+from collections import Counter
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -184,19 +185,32 @@ def by_market(session: Session, user_id: int,
               account: str | None = None,
               display_currency: str | None = None) -> dict:
     """市场分红占比：分红表本身不存 market，需经 holding_id 反查持仓的市场。
-    v8：支持 account 过滤 + display_currency 转换。
-    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    v9：统计页改为「原币种明细 + CNY 折算口径占比/总额」——
+    - items[].amount：原币种金额（美股 $、港股 HK$、A股/基金 ¥）
+    - items[].amount_cny：该市场折算 CNY（用于环形占比，跨币种可比）
+    - items[].currency：该市场主要币种（前端据此显示符号）
+    - total_cny：所有市场折算 CNY 总额（环形中心）
     """
-    if display_currency == "ORIGINAL":
-        display_currency = None
-    holdings = {h.id: h.market for h in _user_holdings(session, user_id, account)}
-    agg: dict[str, Decimal] = {}
+    holdings = {h.id: h for h in _user_holdings(session, user_id, account)}
+    agg_orig: dict[str, Decimal] = {}
+    agg_cny: dict[str, Decimal] = {}
+    cur_mode: dict[str, Counter] = {}
     for d in _user_confirmed_filtered(session, user_id, account):
-        market = holdings.get(d.holding_id)
-        if market:
-            agg[market] = agg.get(market, Decimal("0")) + _net_display(session, d, display_currency)
-    return {"items": [{"market": m, "amount": r2(v)} for m, v in agg.items()],
-            "display_currency": display_currency or "CNY"}
+        h = holdings.get(d.holding_id)
+        if h:
+            # 原币种金额直接相加（同市场通常同币种，不做汇率折算）
+            agg_orig[h.market] = agg_orig.get(h.market, Decimal("0")) + Decimal(str(d.net_amount))
+            # 折算 CNY 用于占比/排序
+            agg_cny[h.market] = agg_cny.get(h.market, Decimal("0")) + _net_cny(session, d)
+            cur_mode.setdefault(h.market, Counter())[h.currency] += 1
+    items = [{
+        "market": m,
+        "amount": r2(agg_orig[m]),
+        "amount_cny": r2(agg_cny[m]),
+        "currency": cur_mode[m].most_common(1)[0][0] if cur_mode[m] else "CNY",
+    } for m in agg_orig]
+    items.sort(key=lambda x: x["amount_cny"], reverse=True)
+    return {"items": items, "total_cny": r2(sum(agg_cny.values()))}
 
 
 def forecast(session: Session, user_id: int,
@@ -266,31 +280,34 @@ def forecast(session: Session, user_id: int,
 def top_holdings(session: Session, user_id: int, limit: int = 10,
                  account: str | None = None,
                  display_currency: str | None = None) -> dict:
-    """v8：支持 account 过滤 + display_currency 转换。
-    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    """持仓分红贡献排行：分红表本身不存市场，需经 holding_id 反查持仓。
+    v9：按 CNY 折算口径排序（跨币种可比），明细金额按原币种显示——
+    - items[].amount：原币种累计分红（前端按 currency 显示符号）
+    - items[].amount_cny：折算 CNY（用于排序与条形占比）
+    - items[].currency：持仓币种
     """
-    if display_currency == "ORIGINAL":
-        display_currency = None
     holdings = {h.id: h for h in _user_holdings(session, user_id, account)}
-    agg: dict[int, Decimal] = {}
+    agg_orig: dict[int, Decimal] = {}
+    agg_cny: dict[int, Decimal] = {}
     for d in _user_confirmed_filtered(session, user_id, account):
         if d.holding_id in holdings:
-            agg[d.holding_id] = agg.get(d.holding_id, Decimal("0")) + _net_display(session, d, display_currency)
-    items = sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:limit]
-    return {"items": [{"holding_id": hid, "name": holdings[hid].name, "amount": r2(v)}
-                      for hid, v in items],
-            "display_currency": display_currency or "CNY"}
+            agg_orig[d.holding_id] = agg_orig.get(d.holding_id, Decimal("0")) + Decimal(str(d.net_amount))
+            agg_cny[d.holding_id] = agg_cny.get(d.holding_id, Decimal("0")) + _net_cny(session, d)
+    items = sorted(agg_cny.items(), key=lambda kv: kv[1], reverse=True)[:limit]
+    return {"items": [{
+        "holding_id": hid, "name": holdings[hid].name,
+        "amount": r2(agg_orig[hid]), "amount_cny": r2(agg_cny[hid]),
+        "currency": holdings[hid].currency,
+    } for hid, _ in items]}
 
 
 def yield_ranking(session: Session, user_id: int,
                   account: str | None = None,
                   display_currency: str | None = None) -> dict:
     """股息率排行：现价股息率（需手填现价）vs 成本股息率 YoC（docs/03 §5）。
-    v8：支持 account 过滤 + display_currency 转换。
-    v8 修正：ORIGINAL 模式下聚合多币种混算无意义，回落 CNY。
+    v9：金额字段（year_dividend / market_value）改为按原币种返回 + currency，
+    前端按持仓币种显示符号；股息率是比值不受币种影响。
     """
-    if display_currency == "ORIGINAL":
-        display_currency = None
     today = today_str()
     year = today[:4]
     holdings = _user_holdings(session, user_id, account)
@@ -304,34 +321,27 @@ def yield_ranking(session: Session, user_id: int,
         if cs["shares_now"] <= 0 or cs["ttm_dps"] <= 0:
             continue
         divs = [d for d in user_divs if d.holding_id == h.id]
-        year_div_amt = sum(_net_display(session, d, display_currency) for d in divs if d.pay_date[:4] == year)
+        # 本年分红按原币种（d.net_amount 直接相加，不做汇率折算）
+        year_div_amt = sum(Decimal(str(d.net_amount)) for d in divs if d.pay_date[:4] == year)
         # 现价：优先用 securities.latest_price（爬虫实时更新），回落 holdings.current_price
         sec = sec_map.get((h.market, h.code))
         latest_price = (sec.latest_price if sec and sec.latest_price else None) or h.current_price
         # 现价股息率 = TTM 每股分红 / 最新价（没价格则为 None，前端显示「—」）
         yield_price = (r4(cs["ttm_dps"] / latest_price)
                        if latest_price and latest_price > 0 else None)
-        # 当前市值（按显示币种转换）= 最新价 × 净持仓 × 汇率
-        if latest_price:
-            if not display_currency or display_currency == "CNY":
-                market_value = r2(Decimal(str(latest_price)) * Decimal(str(cs["shares_now"]))
-                                  * fx_service.get_rate_cny(session, h.currency, today))
-            elif display_currency == "ORIGINAL":
-                market_value = r2(Decimal(str(latest_price)) * Decimal(str(cs["shares_now"])))
-            else:
-                cny = Decimal(str(latest_price)) * Decimal(str(cs["shares_now"])) * fx_service.get_rate_cny(session, h.currency, today)
-                market_value = fx_service.from_cny(session, float(cny), display_currency, today)
-        else:
-            market_value = None
+        # 当前市值按原币种 = 最新价 × 净持仓（v9：不再折算）
+        market_value = (r2(Decimal(str(latest_price)) * Decimal(str(cs["shares_now"])))
+                        if latest_price else None)
         items.append({
             "holding_id": h.id, "name": h.name, "market": h.market,
+            "currency": h.currency,
             "market_value": market_value,
             "year_dividend": r2(year_div_amt),
             "yield_price": yield_price,
             "yoc_ttm": cs["yoc_ttm"],
         })
     items.sort(key=lambda x: x["yoc_ttm"], reverse=True)
-    return {"items": items, "display_currency": display_currency or "CNY"}
+    return {"items": items}
 
 
 def holding_stats(session: Session, h: Holding,
