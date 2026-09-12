@@ -10,7 +10,7 @@
         <view>
           <view class="hero-label">{{ mainMetricName }}</view>
           <view class="hero-value">
-            <text v-if="mainMetric?.format === 'currency'" class="hero-currency">¥</text>
+            <text v-if="mainMetric?.format === 'currency'" class="hero-currency">{{ curSymbol }}</text>
             {{ formatMetricValue(mainMetric, enhanced[mainMetricKey]) }}
           </view>
           <view class="hero-sub" v-if="enhanced.year_growth !== null && enhanced.year_growth !== undefined">
@@ -20,8 +20,15 @@
             <text>较去年同期</text>
           </view>
         </view>
-        <view class="hero-edit" @click="goSettings">
-          <text>自定义</text>
+        <view class="hero-actions">
+          <!-- v8：币种切换（仅总览页生效，对齐 PC 端深色主卡右上角） -->
+          <view class="hero-edit" @click="curVisible = true">
+            <text class="cur-symbol">{{ curSymbol }}</text>
+            <text>{{ curLabel }}</text>
+          </view>
+          <view class="hero-edit" @click="goSettings">
+            <text>自定义</text>
+          </view>
         </view>
       </view>
 
@@ -41,13 +48,33 @@
       </view>
     </view>
 
+    <!-- v8：显示币种切换弹窗（对齐 PC 端总览币种下拉） -->
+    <view v-if="curVisible" class="modal-mask" @click="curVisible = false">
+      <view class="modal-card" @click.stop>
+        <view class="modal-title">显示币种</view>
+        <view class="modal-tip">仅总览看板生效，聚合多币种持仓统一折算；其他页面按人民币显示。</view>
+        <view class="acct-list">
+          <view v-for="c in DISPLAY_CURRENCIES" :key="c.value"
+                :class="['acct-row', userStore.displayCurrency === c.value ? 'on' : '']"
+                @click="pickCurrency(c.value)">
+            <text class="acct-dot" :style="{ background: c.color || '#94a3b8' }"></text>
+            <text class="acct-name">{{ c.label }}</text>
+            <text v-if="userStore.displayCurrency === c.value" class="acct-check">✓</text>
+          </view>
+        </view>
+        <view class="modal-actions">
+          <button class="btn-cancel" @click="curVisible = false">关闭</button>
+        </view>
+      </view>
+    </view>
+
     <!-- ========== 分红趋势 ========== -->
     <view class="m-section-title">分红趋势 · 近 12 个月</view>
     <view class="m-chart-card">
       <view class="m-bar-chart">
         <view class="m-bar-col" v-for="(m, i) in trend.months" :key="i">
           <view class="m-bar-wrap">
-            <view class="m-bar" :style="{ height: barHeight(trend.amounts_cny[i]) + 'rpx' }"></view>
+            <view class="m-bar" :style="{ height: barHeight(trend.amounts[i]) + 'rpx' }"></view>
           </view>
           <view class="m-bar-label">{{ m.slice(5) }}</view>
         </view>
@@ -63,21 +90,21 @@
       </view>
       <view class="m-snapshot-row">
         <text class="label">累计收息</text>
-        <text class="value">¥{{ fmt(enhanced.total_received_cny) }}</text>
+        <text class="value">{{ fmtDisplay(enhanced.total_received, enhanced.display_currency) }}</text>
       </view>
       <view class="m-snapshot-row">
         <text class="label">总市值</text>
-        <text class="value">{{ enhanced.market_value_cny > 0 ? '¥' + fmt(enhanced.market_value_cny) : '—' }}</text>
+        <text class="value">{{ enhanced.market_value > 0 ? fmtDisplay(enhanced.market_value, enhanced.display_currency) : '—' }}</text>
       </view>
       <view class="m-snapshot-row">
         <text class="label">浮动盈亏</text>
-        <text class="value" :class="pnlClass(enhanced.floating_pnl_cny)">
-          {{ enhanced.market_value_cny > 0 ? (enhanced.floating_pnl_cny >= 0 ? '+' : '') + '¥' + fmt(enhanced.floating_pnl_cny) : '—' }}
+        <text class="value" :class="pnlClass(enhanced.floating_pnl)">
+          {{ enhanced.market_value > 0 ? (enhanced.floating_pnl >= 0 ? '+' : '') + fmtDisplay(enhanced.floating_pnl, enhanced.display_currency) : '—' }}
         </text>
       </view>
       <view class="m-snapshot-row">
         <text class="label">净投入</text>
-        <text class="value">¥{{ fmt(enhanced.net_investment_cny) }}</text>
+        <text class="value">{{ fmtDisplay(enhanced.net_investment, enhanced.display_currency) }}</text>
       </view>
     </view>
 
@@ -88,8 +115,9 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
-import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend } from '@/api'
-import { userStore } from '@/store/user'
+import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend, apiSaveSettings } from '@/api'
+import { userStore, setDisplayCurrency } from '@/store/user'
+import { fmtDisplay } from '@/utils/constants'
 // #ifdef H5
 import WebLayout from '@/components/WebLayout.vue'
 // #endif
@@ -98,9 +126,29 @@ import WebLayout from '@/components/WebLayout.vue'
 const enhanced = ref({})
 const registry = ref([])
 const selectedMetrics = ref([])
-const trend = ref({ months: [], amounts_cny: [] })
+const trend = ref({ months: [], amounts: [] })
+const curVisible = ref(false)
 
-/** v8：账户跟随 + 显示币种参数（从 store 读） */
+/** v8：币种选项（仅总览页生效，对齐 PC 端总览下拉） */
+const DISPLAY_CURRENCIES = [
+  { value: 'CNY', label: '人民币（统一折算）', color: '#dc2626' },
+  { value: 'USD', label: '美元', color: '#2563eb' },
+  { value: 'HKD', label: '港币', color: '#059669' },
+  { value: 'ORIGINAL', label: '本币（按原币种）', color: '#7c3aed' },
+]
+
+/** v8：总览页显示币种符号（¥ / $ / HK$），跟随 userStore.displayCurrency */
+const curSymbol = computed(() => {
+  const symbols = { CNY: '¥', USD: '$', HKD: 'HK$' }
+  return symbols[userStore.displayCurrency] || '¥'
+})
+/** 币种切换按钮标签 */
+const curLabel = computed(() => {
+  const labels = { CNY: '人民币', USD: '美元', HKD: '港币', ORIGINAL: '本币' }
+  return labels[userStore.displayCurrency] || '人民币'
+})
+
+/** v8：账户跟随 + 显示币种参数（仅总览页传 display_currency） */
 function filterParams() {
   const p = {}
   if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
@@ -112,8 +160,17 @@ function filterParams() {
   return p
 }
 
+/** v8：切换显示币种（持久化到后端后刷新数据） */
+async function pickCurrency(value) {
+  // setDisplayCurrency 是 store 独立导出函数（非 userStore 方法）
+  setDisplayCurrency(value)
+  curVisible.value = false
+  try { await apiSaveSettings({ display_currency: value }) } catch (e) { /* 静默 */ }
+  await load()
+}
+
 // ---------- 计算属性 ----------
-const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year_cny')
+const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year')
 const mainMetric = computed(() => getMetricDef(mainMetricKey.value))
 const mainMetricName = computed(() => mainMetric.value?.name || '预测年度分红')
 
@@ -130,7 +187,8 @@ function formatMetricValue(def, val) {
   if (val === null || val === undefined || val === 0) return '—'
   if (!def) return fmt(val)
   switch (def.format) {
-    case 'currency': return '¥' + fmt(val)
+    // v8：货币类用 fmtDisplay 动态符号（跟随总览币种）
+    case 'currency': return fmtDisplay(val, userStore.displayCurrency)
     case 'percent': return (val * 100).toFixed(2) + '%'
     case 'number': return val + ' 只'
     default: return fmt(val)
@@ -139,7 +197,7 @@ function formatMetricValue(def, val) {
 
 function valueColorClass(key, val) {
   if (val === null || val === undefined || val === 0) return ''
-  if (key === 'floating_pnl_cny' || key === 'pnl_rate') {
+  if (key === 'floating_pnl' || key === 'pnl_rate') {
     return val >= 0 ? 'positive' : 'negative'
   }
   return ''
@@ -151,7 +209,7 @@ function pnlClass(val) {
 }
 
 function barHeight(v) {
-  const max = Math.max(...(trend.value.amounts_cny || [0]), 1)
+  const max = Math.max(...(trend.value.amounts || [0]), 1)
   return Math.max(6, Math.round((v / max) * 200))
 }
 
@@ -248,6 +306,77 @@ onPullDownRefresh(load)
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 12rpx;
   z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6rpx;
+}
+.hero-actions {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  z-index: 1;
+}
+.cur-symbol {
+  font-size: 26rpx;
+  font-weight: 600;
+  color: rgba(255,255,255,0.9);
+}
+
+/* ========== 币种切换弹窗（对齐 mine 账户切换弹窗） ========== */
+.modal-mask {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.5);
+  z-index: 999;
+  display: flex;
+  align-items: flex-end;
+}
+.modal-card {
+  width: 100%;
+  background: #fff;
+  border-radius: 24rpx 24rpx 0 0;
+  padding: 32rpx 32rpx 40rpx;
+  box-sizing: border-box;
+}
+.modal-title {
+  font-size: 32rpx;
+  font-weight: 600;
+  text-align: center;
+}
+.modal-tip {
+  font-size: 22rpx;
+  color: #999;
+  margin: 12rpx 0 24rpx;
+  text-align: center;
+  line-height: 1.6;
+}
+.acct-list { display: flex; flex-direction: column; }
+.acct-row {
+  display: flex;
+  align-items: center;
+  padding: 26rpx 8rpx;
+  border-bottom: 1px solid #f5f5f5;
+}
+.acct-row:last-child { border-bottom: none; }
+.acct-row.on .acct-name { color: #2563eb; font-weight: 600; }
+.acct-dot {
+  width: 16rpx; height: 16rpx;
+  border-radius: 50%;
+  margin-right: 20rpx;
+  flex-shrink: 0;
+}
+.acct-name { flex: 1; font-size: 28rpx; color: #333; }
+.acct-check { color: #2563eb; font-size: 30rpx; font-weight: 700; }
+.modal-actions { display: flex; gap: 20rpx; margin-top: 32rpx; }
+.btn-cancel {
+  flex: 1;
+  height: 84rpx;
+  line-height: 84rpx;
+  text-align: center;
+  border-radius: 16rpx;
+  background: #f1f5f9;
+  color: #475569;
+  font-size: 28rpx;
 }
 
 /* 指标网格 */

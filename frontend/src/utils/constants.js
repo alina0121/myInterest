@@ -71,3 +71,17 @@ export function moneyWith(cur, n) {
   const s = currencyMap[cur]?.symbol || ''
   return fmtMoney(n, s)
 }
+
+/** v8：按显示币种带符号格式化金额（对齐 PC 端 fmtDisplay）
+ * displayCurrency: 'CNY' / 'USD' / 'HKD' / 'ORIGINAL'
+ * ORIGINAL 模式按 originalCurrency 出符号（单条记录场景）
+ */
+export function fmtDisplay(n, displayCurrency = 'CNY', originalCurrency = null) {
+  if (n === null || n === undefined) return '—'
+  const symbols = { CNY: '¥', USD: '$', HKD: 'HK$' }
+  if (displayCurrency === 'ORIGINAL' && originalCurrency) {
+    return (symbols[originalCurrency] || '¥') + fmt(n)
+  }
+  const sym = symbols[displayCurrency] || '¥'
+  return sym + fmt(n)
+}

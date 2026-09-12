@@ -56,7 +56,7 @@
         <view class="item-bottom">
           <view class="div-info">
             <text class="div-label">累计分红</text>
-            <text class="div-amount">¥{{ fmt(h.total_dividend_cny || h.total_dividend || 0) }}</text>
+            <text class="div-amount">{{ moneyWith(h.currency, h.total_dividend || 0) }}</text>
           </view>
           <view class="yoc-info" v-if="h.yoc_ttm">
             <text class="yoc-label">成本息率</text>

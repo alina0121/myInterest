@@ -92,14 +92,11 @@ const loading = ref(false)
 const netSum = ref(0)
 const pendSum = ref(0)
 
-/** v8：账户跟随 + 显示币种参数（从 store 读） */
+/** v8：账户跟随（币种转换仅在总览页生效，分红页按 CNY 显示） */
 function filterParams() {
   const p = {}
   if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
     p.account = userStore.currentAccount
-  }
-  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
-    p.display_currency = userStore.displayCurrency
   }
   return p
 }
@@ -138,7 +135,7 @@ async function loadSummary() {
   if (status.value) params.status = status.value
   if (year.value) params.year = year.value
   if (market.value) params.market = market.value
-  // v8：账户跟随 + 币种过滤
+  // v8：账户跟随（币种转换仅在总览页生效）
   Object.assign(params, filterParams())
   const data = await apiDividends(params)
   netSum.value = data.items

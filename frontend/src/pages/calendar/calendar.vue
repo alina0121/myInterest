@@ -11,12 +11,12 @@
     <!-- 月汇总 -->
     <view class="sum">
       <view class="sum-cell">
-        <view class="sum-val text-emerald">¥{{ fmt(data.month_confirmed_cny) }}</view>
+        <view class="sum-val text-emerald">¥{{ fmt(data.month_confirmed) }}</view>
         <view class="sum-label">本月已到账</view>
       </view>
       <view class="sum-divider"></view>
       <view class="sum-cell">
-        <view class="sum-val text-amber">¥{{ fmt(data.month_pending_cny) }}</view>
+        <view class="sum-val text-amber">¥{{ fmt(data.month_pending) }}</view>
         <view class="sum-label">预告中</view>
       </view>
     </view>
@@ -157,13 +157,10 @@ const timelineList = computed(() => {
 
 async function load() {
   selectedDay.value = null
-  // v8：账户跟随
+  // v8：账户跟随（币种转换仅在总览页生效，日历页按 CNY 显示）
   const params = {}
   if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
     params.account = userStore.currentAccount
-  }
-  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
-    params.display_currency = userStore.displayCurrency
   }
   data.value = await apiCalendar(year.value, month.value, params)
   // #ifdef MP-WEIXIN || MP-ALIPAY

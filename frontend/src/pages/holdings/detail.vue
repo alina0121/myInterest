@@ -21,7 +21,7 @@
           <view class="hs-label">TTM成本股息率</view>
         </view>
         <view class="hs-cell">
-          <view class="hs-val">¥{{ fmt(h.year_dividend_cny || h.year_dividend) }}</view>
+          <view class="hs-val">{{ sym(h.currency) }}{{ fmt(h.year_dividend) }}</view>
           <view class="hs-label">今年分红</view>
         </view>
       </view>
@@ -96,7 +96,7 @@
       <view v-if="!yearly.length" class="empty card">暂无年度数据</view>
       <view v-for="y in yearly" :key="y.year" class="card year-card">
         <text class="year-label">{{ y.year }} 年</text>
-        <text class="year-amt text-emerald">¥{{ fmt(y.net_cny) }}</text>
+        <text class="year-amt text-emerald">{{ sym(h.currency) }}{{ fmt(y.net) }}</text>
       </view>
     </block>
 

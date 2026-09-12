@@ -8,7 +8,7 @@
       <view class="forecast-bars">
         <view class="fb-col" v-for="(m, i) in forecast.months" :key="i">
           <view class="fb-wrap">
-            <view class="fb-bar" :style="{ height: fbHeight(forecast.amounts_cny[i]) + 'rpx' }"></view>
+            <view class="fb-bar" :style="{ height: fbHeight(forecast.amounts[i]) + 'rpx' }"></view>
           </view>
           <view class="fb-label">{{ m.slice(5) }}</view>
         </view>
@@ -36,9 +36,9 @@
             </view>
             <view class="mkt-bar">
               <view class="mkt-fill"
-                    :style="{ width: mktPct(m.amount_cny) + '%', background: marketColor(m.market) }"></view>
+                    :style="{ width: mktPct(m.amount) + '%', background: marketColor(m.market) }"></view>
             </view>
-            <view class="mkt-amt">¥{{ fmt(m.amount_cny) }}</view>
+            <view class="mkt-amt">¥{{ fmt(m.amount) }}</view>
           </view>
         </view>
       </view>
@@ -49,8 +49,8 @@
       <view class="card-title">年度分红总额</view>
       <view class="year-bars">
         <view class="yb-col" v-for="y in yearList" :key="y.year">
-          <view class="yb-val">¥{{ fmt(y.total_cny) }}</view>
-          <view class="yb-wrap"><view class="yb-bar" :style="{ height: ybHeight(y.total_cny) + 'rpx' }"></view></view>
+          <view class="yb-val">¥{{ fmt(y.total) }}</view>
+          <view class="yb-wrap"><view class="yb-bar" :style="{ height: ybHeight(y.total) + 'rpx' }"></view></view>
           <view class="yb-label">{{ y.year }}</view>
         </view>
       </view>
@@ -64,8 +64,8 @@
         <view class="top-name">
           <view class="tn-main">{{ h.name }}</view>
         </view>
-        <view class="top-bar"><view class="top-fill" :style="{ width: topPct(h.amount_cny) + '%' }"></view></view>
-        <view class="top-amt text-emerald">¥{{ fmt(h.amount_cny) }}</view>
+        <view class="top-bar"><view class="top-fill" :style="{ width: topPct(h.amount) + '%' }"></view></view>
+        <view class="top-amt text-emerald">¥{{ fmt(h.amount) }}</view>
       </view>
     </view>
 
@@ -119,7 +119,7 @@
         </view>
         <view class="tr" v-for="h in yieldList" :key="h.holding_id">
           <view class="td">{{ h.name }}</view>
-          <view class="td ar">¥{{ fmt(h.year_dividend_cny) }}</view>
+          <view class="td ar">¥{{ fmt(h.year_dividend) }}</view>
           <view class="td ar text-emerald">{{ (h.yoc_ttm * 100).toFixed(2) }}%</view>
           <view class="td ar">{{ h.yield_price ? (h.yield_price * 100).toFixed(2) + '%' : '—' }}</view>
         </view>
@@ -142,16 +142,13 @@ const marketList = ref([])
 const yearList = ref([])
 const topList = ref([])
 const yieldList = ref([])
-const forecast = ref({ months: [], amounts_cny: [] })
+const forecast = ref({ months: [], amounts: [] })
 
-/** v8：账户跟随 + 显示币种参数（从 store 读） */
+/** v8：账户跟随（币种转换仅在总览页生效，统计页按 CNY 显示） */
 function filterParams() {
   const p = {}
   if (userStore.currentAccount && userStore.currentAccount !== '__all__') {
     p.account = userStore.currentAccount
-  }
-  if (userStore.displayCurrency && userStore.displayCurrency !== 'CNY') {
-    p.display_currency = userStore.displayCurrency
   }
   return p
 }
@@ -161,19 +158,19 @@ function fmt(n) {
 }
 function sym(c) { return currencyMap[c]?.symbol || '' }
 function ybHeight(v) {
-  const max = Math.max(...yearList.value.map(y => y.total_cny || 0), 1)
+  const max = Math.max(...yearList.value.map(y => y.total || 0), 1)
   return Math.max(8, Math.round((v / max) * 200))
 }
 function topPct(v) {
-  const max = topList.value[0]?.amount_cny || 1
+  const max = topList.value[0]?.amount || 1
   return Math.round((v / max) * 100)
 }
 function mktPct(v) {
-  const max = Math.max(...marketList.value.map(m => m.amount_cny || 0), 1)
+  const max = Math.max(...marketList.value.map(m => m.amount || 0), 1)
   return Math.round((v / max) * 100)
 }
 function fbHeight(v) {
-  const max = Math.max(...(forecast.value.amounts_cny || [0]), 1)
+  const max = Math.max(...(forecast.value.amounts || [0]), 1)
   return Math.max(6, Math.round((v / max) * 200))
 }
 function marketColor(market) {
@@ -181,7 +178,7 @@ function marketColor(market) {
 }
 
 const marketTotal = computed(() =>
-  marketList.value.reduce((s, m) => s + Number(m.amount_cny || 0), 0)
+  marketList.value.reduce((s, m) => s + Number(m.amount || 0), 0)
 )
 
 const donutGradient = computed(() => {
@@ -190,7 +187,7 @@ const donutGradient = computed(() => {
   let acc = 0
   const segs = []
   marketList.value.forEach(m => {
-    const pct = (Number(m.amount_cny || 0) / total) * 100
+    const pct = (Number(m.amount || 0) / total) * 100
     if (pct <= 0) return
     const color = marketColor(m.market)
     segs.push(`${color} ${acc.toFixed(2)}% ${(acc + pct).toFixed(2)}%`)
@@ -217,16 +214,13 @@ function yocPct(v) {
 // ---------- 加载 ----------
 async function loadData() {
   try {
-    // v8：账户跟随 + 显示币种转换
+    // v8：账户跟随（币种转换仅在总览页生效，统计页按 CNY 显示）
     const fp = filterParams()
     const acct = userStore.currentAccount && userStore.currentAccount !== '__all__'
       ? { account: userStore.currentAccount } : {}
-    const dc = userStore.displayCurrency && userStore.displayCurrency !== 'CNY'
-      ? { display_currency: userStore.displayCurrency } : {}
-    const acctParams = { ...acct, ...dc }
     const [m, top, yld, trend, fc] = await Promise.all([
-      apiByMarket(fp), apiTopHoldings(10, acctParams), apiYieldRanking(acctParams),
-      apiMonthlyTrend('12m', fp), apiForecast(dc),
+      apiByMarket(fp), apiTopHoldings(10, acct), apiYieldRanking(acct),
+      apiMonthlyTrend('12m', fp), apiForecast(),
     ])
     marketList.value = m.items || []
     topList.value = (top.items || []).slice(0, 10)
@@ -235,9 +229,9 @@ async function loadData() {
     const yearMap = {}
     trend.months?.forEach((mo, i) => {
       const y = mo.slice(0, 4)
-      yearMap[y] = (yearMap[y] || 0) + (trend.amounts_cny?.[i] || 0)
+      yearMap[y] = (yearMap[y] || 0) + (trend.amounts?.[i] || 0)
     })
-    yearList.value = Object.entries(yearMap).map(([year, total_cny]) => ({ year, total_cny }))
+    yearList.value = Object.entries(yearMap).map(([year, total]) => ({ year, total }))
     forecast.value = fc
   } catch (e) { /* toast 已统一 */ }
 }

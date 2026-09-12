@@ -20,12 +20,6 @@
         <text class="m-sub-text">{{ currentAccountText }}</text>
         <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
       </view>
-      <view class="menu-row" @click="showCurrencySwitch">
-        <SvgIcon name="rate" :size="40" />
-        <text class="m-label">显示币种</text>
-        <text class="m-sub-text">{{ displayCurrencyText }}</text>
-        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
-      </view>
       <view class="menu-row" @click="go('/pages/stats/stats')">
         <SvgIcon name="stats" :size="40" />
         <text class="m-label">统计分析</text>
@@ -43,26 +37,6 @@
         <text :class="['m-status', settings.remind_on_payday ? 'on' : 'off']">
           {{ settings.remind_on_payday ? '已开启' : '未开启' }}
         </text>
-      </view>
-    </view>
-
-    <!-- v8：显示币种切换弹窗 -->
-    <view v-if="curVisible" class="modal-mask" @click="curVisible = false">
-      <view class="modal-card" @click.stop>
-        <view class="modal-title">显示币种</view>
-        <view class="modal-tip">选择后，所有页面的金额将按该币种显示。选「本币」则各市场按原币种显示。</view>
-        <view class="acct-list">
-          <view v-for="c in DISPLAY_CURRENCIES" :key="c.value"
-                :class="['acct-row', userStore.displayCurrency === c.value ? 'on' : '']"
-                @click="pickCurrency(c.value)">
-            <text class="acct-dot" :style="{ background: c.color || '#94a3b8' }"></text>
-            <text class="acct-name">{{ c.label }}</text>
-            <text v-if="userStore.displayCurrency === c.value" class="acct-check">✓</text>
-          </view>
-        </view>
-        <view class="modal-actions">
-          <button class="btn-cancel" @click="curVisible = false">关闭</button>
-        </view>
       </view>
     </view>
 
@@ -140,17 +114,9 @@ import {
   apiRates, apiSettings, apiSaveSettings, apiLogout,
   apiSendCode, apiBindEmail, apiMe, apiAccounts, apiAccountsMeta,
 } from '@/api'
-import { userStore, setAuth, clearAuth, syncFromSettings, setCurrentAccount, setDisplayCurrency } from '@/store/user'
+import { userStore, setAuth, clearAuth, syncFromSettings, setCurrentAccount } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
-
-// v8：显示币种选项
-const DISPLAY_CURRENCIES = [
-  { value: 'CNY', label: '人民币 ¥', color: '#dc2626' },
-  { value: 'USD', label: '美元 $', color: '#2563eb' },
-  { value: 'HKD', label: '港币 HK$', color: '#059669' },
-  { value: 'ORIGINAL', label: '本币（按原币种显示）', color: '#7c3aed' },
-]
 
 const user = computed(() => userStore.user)
 const rates = ref({})
@@ -164,14 +130,6 @@ const currentAccountText = computed(() => {
   const a = accountList.value.find(x => x.name === userStore.currentAccount)
   return a ? a.name : '全部账户'
 })
-// v8：显示币种
-const curVisible = ref(false)
-const displayCurrencyText = computed(() => {
-  const c = DISPLAY_CURRENCIES.find(x => x.value === userStore.displayCurrency)
-  return c ? c.label : '人民币'
-})
-
-const visibleText = computed(() => displayCurrencyText.value)  // 兼容旧引用
 
 async function load() {
   try {
@@ -219,20 +177,6 @@ async function toggleArchive(a) {
     const data = await apiAccounts()
     accountList.value = data.items || []
   } catch (e) { /* toast 已统一 */ }
-}
-
-// v8：显示币种切换
-function showCurrencySwitch() {
-  curVisible.value = true
-}
-async function pickCurrency(value) {
-  setDisplayCurrency(value)
-  curVisible.value = false
-  // 持久化到后端 settings
-  try {
-    await apiSaveSettings({ display_currency: value })
-  } catch (e) { /* 静默 */ }
-  uni.showToast({ title: '显示币种已更新', icon: 'none' })
 }
 
 function go(url) {
