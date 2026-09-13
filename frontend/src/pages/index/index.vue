@@ -247,22 +247,26 @@ onPullDownRefresh(load)
 <style scoped>
 .page { padding-bottom: 30rpx; }
 
-/* ========== 深色主卡 ========== */
+/* ========== Hero 主卡（浅色版） ========== */
+/* 改用浅蓝渐变 + 深色文字，与下方白卡同色系过渡，避免深色突兀 */
 .hero-card {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+  border: 1px solid #dbe4f0;
   border-radius: 20rpx;
-  padding: 32rpx 28rpx;
-  color: #fff;
+  padding: 28rpx 28rpx 22rpx;
+  color: #1e293b;
   margin: 16rpx;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 6rpx 24rpx rgba(30, 58, 138, 0.06);
 }
 .hero-card::before {
   content: '';
   position: absolute;
-  top: -30%; right: -20%;
-  width: 250px; height: 250px;
-  background: radial-gradient(circle, rgba(255,165,0,0.15) 0%, transparent 70%);
+  top: -25%; right: -18%;
+  width: 220px; height: 220px;
+  /* 装饰光晕改为柔蓝色，融入主背景 */
+  background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -270,40 +274,44 @@ onPullDownRefresh(load)
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 24rpx;
+  margin-bottom: 20rpx;
   position: relative;
   z-index: 1;
 }
 .hero-label {
   font-size: 24rpx;
-  color: rgba(255,255,255,0.5);
+  color: #64748b;
   letter-spacing: 4rpx;
 }
 .hero-value {
-  font-size: 72rpx;
+  font-size: 60rpx;
   font-weight: 700;
   letter-spacing: 2rpx;
   margin-top: 8rpx;
+  line-height: 1.15;
+  color: #2563eb;
 }
 .hero-currency {
-  font-size: 30rpx;
-  font-weight: 400;
+  font-size: 28rpx;
+  font-weight: 500;
   margin-right: 6rpx;
-  opacity: 0.7;
+  opacity: 0.65;
+  color: #2563eb;
 }
 .hero-sub {
   font-size: 24rpx;
-  color: rgba(255,255,255,0.5);
+  color: #64748b;
   margin-top: 6rpx;
 }
-.hero-sub .up { color: #4ade80; margin-right: 6rpx; }
-.hero-sub .down { color: #f87171; margin-right: 6rpx; }
+.hero-sub .up { color: #16a34a; margin-right: 6rpx; }
+.hero-sub .down { color: #dc2626; margin-right: 6rpx; }
 
 .hero-edit {
   font-size: 22rpx;
-  color: rgba(255,255,255,0.6);
+  color: #475569;
   padding: 8rpx 20rpx;
-  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.7);
+  border: 1px solid #cbd5e1;
   border-radius: 12rpx;
   z-index: 1;
   display: flex;
@@ -319,7 +327,7 @@ onPullDownRefresh(load)
 .cur-symbol {
   font-size: 26rpx;
   font-weight: 600;
-  color: rgba(255,255,255,0.9);
+  color: #2563eb;
 }
 
 /* ========== 币种切换弹窗（对齐 mine 账户切换弹窗） ========== */
@@ -389,41 +397,57 @@ onPullDownRefresh(load)
 .m-metric-item {
   width: 33.33%;
   padding: 20rpx 16rpx;
-  border-top: 1px solid rgba(255,255,255,0.1);
+  border-top: 1px solid rgba(30, 58, 138, 0.08);
   box-sizing: border-box;
 }
 /* 同一行内非首列加左边框 */
 .m-metric-item:not(:nth-child(3n+1)):not(:first-child) {
-  border-left: 1px solid rgba(255,255,255,0.06);
+  border-left: 1px solid rgba(30, 58, 138, 0.06);
 }
 .m-metric-label {
   font-size: 22rpx;
-  color: rgba(255,255,255,0.5);
+  color: #64748b;
   margin-bottom: 6rpx;
 }
 .m-metric-value {
   font-size: 34rpx;
   font-weight: 600;
-  color: #fff;
+  color: #1e293b;
 }
-.m-metric-value.positive { color: #4ade80; }
-.m-metric-value.negative { color: #f87171; }
+.m-metric-value.positive { color: #16a34a; }
+.m-metric-value.negative { color: #dc2626; }
 
 /* ========== 通用区块标题 ========== */
+/* 加左侧色块强调，让标题更"实"以呼应 hero 的品牌蓝主色 */
 .m-section-title {
   font-size: 28rpx;
   font-weight: 600;
   margin: 28rpx 32rpx 16rpx;
   color: #1a1a1a;
+  position: relative;
+  padding-left: 18rpx;
+  display: flex;
+  align-items: center;
+}
+.m-section-title::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 6rpx; height: 26rpx;
+  background: linear-gradient(180deg, #2563eb 0%, #3b82f6 100%);
+  border-radius: 3rpx;
 }
 
 /* ========== 分红趋势 ========== */
+/* 优化：边框颜色改为更柔和的灰，并加阴影层次 */
 .m-chart-card {
   background: #fff;
   border-radius: 16rpx;
   padding: 24rpx 16rpx;
   margin: 0 16rpx;
-  border: 1px solid #eee;
+  border: 1px solid #eef0f4;
+  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
 }
 .m-bar-chart {
   display: flex;
@@ -446,31 +470,33 @@ onPullDownRefresh(load)
 }
 .m-bar {
   width: 18rpx;
-  background: linear-gradient(180deg, #1e3a8a 0%, #3b82f6 100%);
+  background: linear-gradient(180deg, #2563eb 0%, #3b82f6 100%);
   border-radius: 4rpx 4rpx 0 0;
   min-height: 4rpx;
 }
 .m-bar-label { font-size: 18rpx; color: #94a3b8; margin-top: 8rpx; }
 
 /* ========== 持仓快照 ========== */
+/* 优化：与趋势卡同样的阴影层次 */
 .m-snapshot-card {
-  background: #fff;
+  background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
   border-radius: 16rpx;
   margin: 0 16rpx;
-  border: 1px solid #eee;
+  border: 1px solid #eef0f4;
   overflow: hidden;
+  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
 }
 .m-snapshot-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   padding: 24rpx 28rpx;
-  border-bottom: 1px solid #f5f5f5;
+  border-bottom: 1px solid #f1f5f9;
   font-size: 26rpx;
 }
 .m-snapshot-row:last-child { border-bottom: none; }
-.m-snapshot-row .label { color: #999; }
-.m-snapshot-row .value { font-weight: 500; color: #333; }
+.m-snapshot-row .label { color: #64748b; }
+.m-snapshot-row .value { font-weight: 600; color: #1e293b; }
 .m-snapshot-row .value.positive { color: #16a34a; }
 .m-snapshot-row .value.negative { color: #dc2626; }
 

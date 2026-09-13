@@ -405,21 +405,25 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
 </script>
 
 <style scoped>
-/* ========== 深色主卡 ========== */
+/* ========== Hero 主卡（浅色版） ========== */
+/* 改用浅蓝渐变背景 + 深色文字，与下方白卡形成同色系层次过渡，避免深色突兀 */
 .hero-card {
-  background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+  background: linear-gradient(135deg, #eff6ff 0%, #e0e7ff 100%);
+  border: 1px solid #dbe4f0;
   border-radius: 16px;
-  padding: 32px;
-  color: #fff;
+  padding: 26px 28px 22px;
+  color: #1e293b;
   position: relative;
   overflow: hidden;
+  box-shadow: 0 4px 14px rgba(30, 58, 138, 0.06);
 }
 .hero-card::before {
   content: '';
   position: absolute;
-  top: -50%; right: -20%;
-  width: 400px; height: 400px;
-  background: radial-gradient(circle, rgba(255,165,0,0.15) 0%, transparent 70%);
+  top: -40%; right: -18%;
+  width: 360px; height: 360px;
+  /* 装饰光晕改为柔蓝色，融入主背景 */
+  background: radial-gradient(circle, rgba(59,130,246,0.12) 0%, transparent 70%);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -427,53 +431,58 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 28px;
+  margin-bottom: 22px;
   position: relative;
   z-index: 1;
 }
 .hero-label {
   font-size: 13px;
-  color: rgba(255,255,255,0.5);
+  color: #64748b;
   letter-spacing: 2px;
 }
 .hero-value {
-  font-size: 48px;
+  font-size: 40px;
   font-weight: 700;
   letter-spacing: 1px;
   margin-top: 6px;
+  line-height: 1.15;
+  color: #2563eb;
 }
 .hero-currency {
-  font-size: 20px;
-  font-weight: 400;
+  font-size: 18px;
+  font-weight: 500;
   margin-right: 4px;
-  opacity: 0.7;
+  opacity: 0.65;
+  color: #2563eb;
 }
 .hero-sub {
   font-size: 13px;
-  color: rgba(255,255,255,0.5);
+  color: #64748b;
   margin-top: 4px;
 }
-.hero-sub .up { color: #4ade80; margin-right: 4px; }
-.hero-sub .down { color: #f87171; margin-right: 4px; }
+.hero-sub .up { color: #16a34a; margin-right: 4px; }
+.hero-sub .down { color: #dc2626; margin-right: 4px; }
 
 .hero-edit {
   display: flex;
   align-items: center;
   gap: 6px;
   font-size: 13px;
-  color: rgba(255,255,255,0.6);
+  color: #475569;
   cursor: pointer;
   padding: 8px 14px;
   border-radius: 8px;
-  border: 1px solid rgba(255,255,255,0.2);
+  background: rgba(255,255,255,0.7);
+  border: 1px solid #cbd5e1;
   transition: all 0.2s;
   z-index: 1;
   white-space: nowrap;
   outline: none;
 }
 .hero-edit:hover {
-  background: rgba(255,255,255,0.1);
-  color: #fff;
+  background: #fff;
+  color: #2563eb;
+  border-color: #93c5fd;
 }
 .hero-actions {
   display: flex;
@@ -484,7 +493,7 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
 .cur-symbol {
   font-size: 15px;
   font-weight: 600;
-  color: rgba(255,255,255,0.9);
+  color: #2563eb;
 }
 
 /* 指标网格：自适应 3~4 列 */
@@ -504,57 +513,78 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
 
 .metric-item {
   padding: 18px 12px;
-  border-top: 1px solid rgba(255,255,255,0.1);
+  border-top: 1px solid rgba(30, 58, 138, 0.08);
   cursor: pointer;
   transition: background 0.15s;
 }
 .metric-item:hover {
-  background: rgba(255,255,255,0.04);
+  background: rgba(59, 130, 246, 0.06);
 }
 /* 同一行内非首列加左边框分隔 */
 .metric-item:not(:nth-child(3n+1)):not(:first-child) {
-  border-left: 1px solid rgba(255,255,255,0.06);
+  border-left: 1px solid rgba(30, 58, 138, 0.06);
 }
 .metric-label {
   font-size: 12px;
-  color: rgba(255,255,255,0.5);
+  color: #64748b;
   margin-bottom: 6px;
 }
 .metric-value {
   font-size: 22px;
   font-weight: 600;
-  color: #fff;
+  color: #1e293b;
 }
-.metric-value.positive { color: #4ade80; }
-.metric-value.negative { color: #f87171; }
+.metric-value.positive { color: #16a34a; }
+.metric-value.negative { color: #dc2626; }
 .metric-sub {
   font-size: 11px;
-  color: rgba(255,255,255,0.4);
+  color: #94a3b8;
   margin-top: 4px;
 }
 
 /* ========== 原有卡片区 ========== */
+/* 优化：通过深一些的留白节奏让头部到内容过渡更自然 */
 .row-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
 .mt20 { margin-top: 20px; }
 .mt24 { margin-top: 24px; }
-.card h3 { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
+
+/* 优化：给卡片加底部细分割线，让标题与正文形成层次 */
+.card h3 {
+  font-size: 15px; font-weight: 600; margin: 0 0 16px;
+  position: relative;
+  padding-left: 10px;
+}
+.card h3::before {
+  content: '';
+  position: absolute;
+  left: 0; top: 50%;
+  transform: translateY(-50%);
+  width: 3px; height: 14px;
+  background: linear-gradient(180deg, #2563eb 0%, #3b82f6 100%);
+  border-radius: 2px;
+}
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
 .card-head h3 { margin: 0; }
 .chart-h260 { height: 260px; }
 .chart-h300 { height: 300px; }
 
-/* 持仓快照 */
-.info-list { display: flex; flex-direction: column; }
+/* 持仓快照：加柔和中性背景，与图表卡形成区分 */
+.info-list {
+  display: flex; flex-direction: column;
+  background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
+  border-radius: 8px;
+  padding: 4px 12px;
+}
 .info-row {
   display: flex;
   justify-content: space-between;
   font-size: 13px;
-  padding: 10px 0;
-  border-bottom: 1px solid #f5f5f5;
+  padding: 11px 4px;
+  border-bottom: 1px solid #f1f5f9;
 }
 .info-row:last-child { border-bottom: none; }
-.info-row .label { color: #999; }
-.info-row .value { font-weight: 500; color: #333; }
+.info-row .label { color: #64748b; }
+.info-row .value { font-weight: 600; color: #1e293b; }
 .info-row .value.positive { color: #16a34a; }
 .info-row .value.negative { color: #dc2626; }
 
@@ -599,7 +629,7 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
 .metric-setting-num {
   width: 26px;
   height: 26px;
-  background: #1a1a2e;
+  background: #2563eb;
   color: #fff;
   border-radius: 50%;
   display: flex;
@@ -632,8 +662,8 @@ onUnmounted(() => { fc.dispose(); tr.dispose(); mk.dispose() })
 .metric-setting-name .main-tag {
   display: inline-block;
   font-size: 11px;
-  color: #1a1a2e;
-  background: #fef3c7;
+  color: #2563eb;
+  background: #dbeafe;
   padding: 1px 6px;
   border-radius: 4px;
   margin-left: 6px;
