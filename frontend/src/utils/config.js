@@ -1,14 +1,15 @@
 /**
  * 环境与接口地址配置（docs/05-前端三端设计.md §2 baseUrl 策略）
- * - H5 开发：直连本机 8000 端口（CORS 已全开）
- * - 微信开发者工具：urlCheck 关闭时可直连 127.0.0.1（同机调试）
- * - 真机预览/发布：改为局域网 IP 或 https 备案域名
+ * - H5 生产：走同域相对路径，/api 由 Caddy 反代到后端（mobile.icefun.cn）
+ * - 小程序：同域相对路径（经配置的合法域名/代理）
+ * - 真机调试：如需改地址，把 BASE_URL 改成局域网 IP 或 https 域名
  */
 // #ifdef H5
-export const BASE_URL = 'http://127.0.0.1:8000'
+// 生产走同域相对路径：/api 由 Caddy 反代到后端（mobile.icefun.cn）
+export const BASE_URL = ''
 // #endif
 // #ifndef H5
-export const BASE_URL = 'http://127.0.0.1:8000'
+export const BASE_URL = ''
 // #endif
 
 export const TOKEN_KEY = 'xi_token'

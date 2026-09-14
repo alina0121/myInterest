@@ -32,7 +32,7 @@ async def lifespan(_app: FastAPI):
         task.cancel()
 
 
-app = FastAPI(title="息计 API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="息计 API", version="0.2.0", lifespan=lifespan)
 
 # H5 开发跨域
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False,

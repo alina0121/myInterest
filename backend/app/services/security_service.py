@@ -81,15 +81,19 @@ def security_map(session: Session, keys: Iterable[tuple[str, str]]
     batch_size = 400
     for start in range(0, len(keys), batch_size):
         batch = keys[start:start + batch_size]
-        placeholders = ",".join(f"(:m{i},:c{i})" for i in range(len(batch)))
-        params: dict = {}
-        for i, (m, c) in enumerate(batch):
-            params[f"m{i}"] = m
-            params[f"c{i}"] = c
-        sql = f"SELECT * FROM securities WHERE (market, code) IN ({placeholders})"
-        for r in session.execute(text(sql), params).all():
-            sec = Security.model_validate(dict(r._mapping))
-            result[(sec.market, sec.code)] = sec
+        # 按 market 分组后，每组用「单列 code IN」查询，规避 SQLite 对
+        # 参数化 row-value IN（`WHERE (market, code) IN (...)`) 的
+        # "row value misused" 限制（该错误在 holdings 非空时触发）。
+        by_market: dict[str, list[str]] = {}
+        for m, c in batch:
+            by_market.setdefault(m, []).append(c)
+        for market, codes in by_market.items():
+            ph = ",".join(f":c{i}" for i in range(len(codes)))
+            q_params = {f"c{i}": c for i, c in enumerate(codes)}
+            sql = f"SELECT * FROM securities WHERE market=:m AND code IN ({ph})"
+            for r in session.execute(text(sql), {"m": market, **q_params}).all():
+                sec = Security.model_validate(dict(r._mapping))
+                result[(sec.market, sec.code)] = sec
     return result
 
 
