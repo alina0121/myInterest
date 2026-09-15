@@ -50,11 +50,11 @@
       </view>
       <!-- 批次归属 -->
       <view v-if="openId === d.id" class="alloc">
-        <view class="alloc-title">批次归属明细（共 {{ d.allocations?.length || 0 }} 个批次参与）</view>
-        <view v-for="(a, i) in d.allocations" :key="i" class="alloc-row">
+        <view class="alloc-title">批次归属明细（共 {{ d.batches?.length || 0 }} 个批次参与）</view>
+        <view v-for="(a, i) in d.batches" :key="i" class="alloc-row">
           <text>{{ a.lot_date }} 批次</text>
-          <text>{{ a.shares }} 股 · 税 {{ sym(d.currency) }}{{ fmt(a.tax) }}</text>
-          <text class="text-emerald">{{ sym(d.currency) }}{{ fmt(a.net) }}</text>
+          <text>{{ fmt(a.shares) }} 股 · 税率 {{ fmt(a.rate * 100) }}%</text>
+          <text class="text-emerald">{{ sym(d.currency) }}{{ fmt(a.gross) }}</text>
         </view>
       </view>
     </view>
@@ -115,7 +115,7 @@ async function load(reset = true) {
   }
   loading.value = true
   try {
-    const params = { page: page.value, page_size: 20, expand: 'allocations' }
+    const params = { page: page.value, page_size: 20, expand: 'batches' }
     if (status.value) params.status = status.value
     if (year.value) params.year = year.value
     if (market.value) params.market = market.value

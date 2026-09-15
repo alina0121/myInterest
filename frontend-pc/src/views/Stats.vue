@@ -3,7 +3,10 @@
     <!-- 年度分红总额 + 各市场累计分红 -->
     <div class="row-grid">
       <div class="card">
-        <h3>年度分红总额</h3>
+        <h3>月度分红总额</h3>
+        <div class="text-muted" style="font-size: 12px; margin: -4px 0 8px;">
+          税后净额 · 按派息日归月 · 跨币种按 CNY 折算
+        </div>
         <div ref="yearEl" class="chart-h300"></div>
       </div>
       <div class="card">

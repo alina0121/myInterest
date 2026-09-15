@@ -11,7 +11,6 @@ Freq = Literal["monthly", "quarterly", "semi_annual", "annual", "irregular", "un
 FreqOrAuto = Literal["monthly", "quarterly", "semi_annual", "annual",
                      "irregular", "unknown", "auto"]
 Direction = Literal["buy", "sell", "bonus_share"]
-DivStatus = Literal["pending", "confirmed"]
 
 
 # ---------- auth ----------
@@ -125,55 +124,10 @@ class LotUpdate(BaseModel):
     note: Optional[str] = None
 
 
-# ---------- dividends ----------
-class DividendCreate(BaseModel):
-    holding_id: int
-    ex_date: Date
-    record_date: Optional[Date] = None
-    pay_date: Date
-    dps: float = Field(gt=0)
-    tax: Optional[float] = Field(default=None, ge=0)  # 传入则不再自动估算
-    div_type: Literal["cash", "bonus_share"] = "cash"
-    status: DivStatus = "confirmed"
-    note: Optional[str] = None
-
-
-class DividendUpdate(BaseModel):
-    ex_date: Optional[Date] = None
-    record_date: Optional[Date] = None
-    pay_date: Optional[Date] = None
-    dps: Optional[float] = Field(default=None, gt=0)
-    tax: Optional[float] = Field(default=None, ge=0)
-    status: Optional[DivStatus] = None
-    note: Optional[str] = None
-
-
-class ConfirmIn(BaseModel):
-    actual_net: Optional[float] = Field(default=None, ge=0)
-
-
 # ---------- batch：批量录入 ----------
 class LotBatchIn(BaseModel):
     """批量录入批次：支持一次提交多个买入/卖出/送转记录。"""
     lots: list[LotCreate] = Field(min_length=1, max_length=100)
-
-
-class DividendBatchItem(BaseModel):
-    """批量录入分红单条（复用 DividendCreate 字段，holding_id 可不同）。"""
-    holding_id: int
-    ex_date: Date
-    record_date: Optional[Date] = None
-    pay_date: Date
-    dps: float = Field(gt=0)
-    tax: Optional[float] = Field(default=None, ge=0)
-    div_type: Literal["cash", "bonus_share"] = "cash"
-    status: DivStatus = "confirmed"
-    note: Optional[str] = None
-
-
-class DividendBatchIn(BaseModel):
-    """批量录入分红：支持一次提交多只持仓的多笔分红。"""
-    dividends: list[DividendBatchItem] = Field(min_length=1, max_length=100)
 
 
 class ScheduleBatchApproveIn(BaseModel):

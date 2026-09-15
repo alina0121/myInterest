@@ -1,4 +1,8 @@
-"""认证接口：注册/登录/刷新/当前用户/退出/微信登录/邮箱验证码（docs/04 §一）。"""
+"""认证接口：注册/登录/刷新/当前用户/退出/微信登录/邮箱验证码（docs/04 §一）。
+
+v0.3 变更：
+- 去掉 Dividend 落表引用（分红完全实时计算，不再有表可迁）
+"""
 import secrets
 import threading
 import time
@@ -9,7 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlmodel import Session, or_, select
 
 from ..database import get_session
-from ..models import Dividend, Holding, Lot, User, UserSetting
+from ..models import Holding, Lot, User, UserSetting
 from ..schemas import (BindEmailIn, EmailLoginIn, EmailRegisterIn, LoginIn,
                        RefreshIn, RegisterIn, ResetPasswordIn, SendCodeIn,
                        WxLoginIn)
@@ -339,15 +343,12 @@ def bind_email(body: BindEmailIn, request: Request,
             Holding.market == h_a.market,
             Holding.code == h_a.code)).first()
         if h_b:
-            # 同标的两边都有：A 的 lots/dividends 迁到 B 的持仓下
+            # 同标的两边都有：A 的 lots 迁到 B 的持仓下
             for lot in session.exec(select(Lot).where(Lot.holding_id == h_a.id)).all():
                 lot.holding_id = h_b.id
                 lot.user_id = user_b.id
                 session.add(lot)
-            for div in session.exec(select(Dividend).where(Dividend.holding_id == h_a.id)).all():
-                div.holding_id = h_b.id
-                div.user_id = user_b.id
-                session.add(div)
+            # v0.3：无 Dividend/DividendAllocation 落表，不需要迁分红
             session.commit()
             session.delete(h_a)
         else:
@@ -356,15 +357,10 @@ def bind_email(body: BindEmailIn, request: Request,
             session.add(h_a)
     session.commit()
 
-    # 2. 迁 A 的剩余 lots 和 dividends（同持仓冲突的部分已迁，这里处理已切换 holding_id 之外的）
-    #    实际上 lots 通过 holding_id 关联，已在上面处理；dividends 同。
-    #    为防漏，对仍指向 A 的 lots/dividends 兜底改 user_id
+    # 2. 迁 A 的剩余 lots（v0.3：无分红落表，不需要迁）
     for lot in session.exec(select(Lot).where(Lot.user_id == user.id)).all():
         lot.user_id = user_b.id
         session.add(lot)
-    for div in session.exec(select(Dividend).where(Dividend.user_id == user.id)).all():
-        div.user_id = user_b.id
-        session.add(div)
     session.commit()
 
     # 3. 把 A 的 wx_openid/wx_unionid 绑到 B

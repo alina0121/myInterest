@@ -1,9 +1,12 @@
-"""运营后台接口（docs/04 §十一、docs/06）。
+"""运营后台接口（docs/04 §十一、docs/06）——v0.3 改为实时计算。
 
 权限模型（docs/06 §2）：
 - admin：看板、预案审核、公告、反馈、用户查询/重置密码
 - super_admin：另可 封禁/解封、汇率/税率维护
 - 红线：对用户业务数据只读；所有写操作落 admin_operation_logs
+
+v0.3 变更：
+- 去掉 Dividend 落表引用，admin 概览/用户数据里的分红统计改调 dividend_service.list_user_dividends
 """
 import json
 import secrets
@@ -13,14 +16,14 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlmodel import Session, func, select
 
 from ..database import get_session
-from ..models import (AdminOperationLog, Announcement, Dividend, DividendSchedule,
+from ..models import (AdminOperationLog, Announcement, DividendSchedule,
                       ExchangeRate, Feedback, Holding, Lot, Security, TaxRule, User)
 from ..schemas import (AnnouncementCreate, AnnouncementUpdate, ConfigUpdateIn,
                        FeedbackHandleIn, RateManualIn, ScheduleAdminCreate,
                        ScheduleBatchApproveIn, ScheduleRejectIn, SecurityCreateIn,
                        TaxRuleUpdate)
-from ..services import (config_service, crawler_service, fx_service, lots_service,
-                        schedule_service, security_service)
+from ..services import (config_service, crawler_service, dividend_service, fx_service,
+                        lots_service, schedule_service, security_service)
 from ..utils.errors import AppError, Codes, not_found, ok
 from ..utils.security import hash_password
 from ..utils.timeutil import add_days, days_ago_iso, now_str, today_str
@@ -81,6 +84,12 @@ def stats_overview(session: Session = Depends(get_session),
         return session.exec(select(func.count()).select_from(DividendSchedule)
                             .where(DividendSchedule.status == status)).one()
 
+    # v0.3：实时模式下无 Dividend 落表，分红总数改为遍历所有用户实时计算（轻量，概览用）
+    dividend_total = 0
+    for u in users:
+        dividend_total += len(dividend_service.list_user_dividends(
+            session, u.id, year=None, market=None, want_batches=False))
+
     crawl_rows = [s for s in session.exec(select(DividendSchedule)
                   .where(DividendSchedule.source == "crawler")).all()
                   if s.created_at[:10] == today]
@@ -99,7 +108,7 @@ def stats_overview(session: Session = Depends(get_session),
         "user_total": user_total, "new_users_7d": new_users_7d,
         "dau": dau, "mau": mau,
         "holding_total": _count(Holding), "lot_total": _count(Lot),
-        "dividend_total": _count(Dividend),
+        "dividend_total": dividend_total,
         "schedule_pending": _sch_count("pending"),
         "schedule_published_total": _sch_count("published"),
         "schedule_rejected_total": _sch_count("rejected"),
@@ -112,14 +121,16 @@ def stats_overview(session: Session = Depends(get_session),
 def _user_row(session: Session, u: User) -> dict:
     holding_count = session.exec(select(func.count()).select_from(Holding)
                                  .where(Holding.user_id == u.id)).one()
-    divs = session.exec(select(Dividend).where(Dividend.user_id == u.id)).all()
+    # v0.3：实时查询分红
+    divs = dividend_service.list_user_dividends(
+        session, u.id, year=None, market=None, want_batches=False)
     rate_cache: dict[tuple[str, str], float] = {}
     total_cny = 0.0
     for d in divs:
-        key = (d.currency, d.pay_date[:10])
+        key = (d["currency"], d["pay_date"][:10])
         if key not in rate_cache:
-            rate_cache[key] = float(fx_service.get_rate_cny(session, d.currency, key[1]))
-        total_cny += d.net_amount * rate_cache[key]
+            rate_cache[key] = float(fx_service.get_rate_cny(session, d["currency"], key[1]))
+        total_cny += float(d["net_amount"]) * rate_cache[key]
     return {
         "id": u.id, "username": u.username, "email": _mask_email(u.email),
         "nickname": u.nickname, "holding_count": holding_count,
@@ -159,8 +170,11 @@ def admin_user_data(user_id: int, session: Session = Depends(get_session),
     if target is None:
         raise not_found()
     holdings = session.exec(select(Holding).where(Holding.user_id == user_id)).all()
-    divs = session.exec(select(Dividend).where(Dividend.user_id == user_id)
-                        .order_by(Dividend.pay_date.desc())).all()  # type: ignore
+    # v0.3：实时查询分红
+    divs = sorted(
+        dividend_service.list_user_dividends(
+            session, user_id, year=None, market=None, want_batches=False),
+        key=lambda d: d.get("pay_date") or "", reverse=True)
     return ok({
         "user": {
             "id": target.id, "username": target.username,
@@ -171,10 +185,11 @@ def admin_user_data(user_id: int, session: Session = Depends(get_session),
         },
         "holdings": [holding_out(session, h) for h in holdings],
         "dividends": [{
-            "id": d.id, "holding_id": d.holding_id, "ex_date": d.ex_date,
-            "pay_date": d.pay_date, "dps": d.dps, "gross_amount": d.gross_amount,
-            "tax": d.tax, "net_amount": d.net_amount, "currency": d.currency,
-            "status": d.status, "source": d.source,
+            "schedule_id": d["schedule_id"], "holding_id": d["holding_id"],
+            "ex_date": d["ex_date"], "pay_date": d["pay_date"],
+            "dps": d["dps"], "gross_amount": d["gross_amount"],
+            "tax": d["tax"], "net_amount": d["net_amount"],
+            "currency": d["currency"], "status": d["status"],
         } for d in divs],
     })
 

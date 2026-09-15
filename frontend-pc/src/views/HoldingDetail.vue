@@ -99,11 +99,11 @@
               <template #default="{ row }">
                 <div class="alloc-box">
                   <div class="text-muted" style="margin-bottom: 8px">批次归属明细（按股权登记日 {{ row.record_date }} 匹配当时持仓批次）</div>
-                  <template v-if="row.allocations?.length">
-                    <div v-for="a in row.allocations" :key="a.lot_id" class="alloc-line">
-                      <span>{{ a.trade_date }} 买入 {{ fmt(a.lot_shares) }} 股</span>
-                      <span>核销 {{ fmt(a.shares) }} 股</span>
+                  <template v-if="row.batches?.length">
+                    <div v-for="(a, i) in row.batches" :key="i" class="alloc-line">
+                      <span>{{ a.lot_date }} 买入 {{ fmt(a.shares) }} 股参与</span>
                       <span>分红 {{ sym(row.currency) }}{{ fmt(a.gross) }}</span>
+                      <span class="text-muted">税率 {{ fmt(a.rate * 100) }}% · 税费 {{ fmt(a.tax) }}</span>
                     </div>
                   </template>
                   <div v-else class="text-muted">（无明细数据）</div>
@@ -327,7 +327,7 @@ async function load() {
     const params = {}
     const [hh, ss, ll, dd] = await Promise.all([
       apiHolding(id), apiHoldingStats(id, params), apiLots(id),
-      apiDividends({ holding_id: id, page_size: 100, ...params }),
+      apiDividends({ holding_id: id, page_size: 100, expand: 'batches', ...params }),
     ])
     h.value = hh
     st.value = ss

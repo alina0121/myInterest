@@ -77,12 +77,12 @@
           <text class="text-emerald">到账 {{ sym(d.currency) }}{{ fmt(d.net_amount) }}</text>
         </view>
         <!-- 批次归属明细 -->
-        <view v-if="openId === d.id && d.allocations && d.allocations.length" class="alloc">
+        <view v-if="openId === d.id && d.batches && d.batches.length" class="alloc">
           <view class="alloc-title">批次归属明细</view>
-          <view v-for="(a, i) in d.allocations" :key="i" class="alloc-row">
+          <view v-for="(a, i) in d.batches" :key="i" class="alloc-row">
             <text>{{ a.lot_date }} 买入的批次</text>
-            <text>{{ a.shares }} 股</text>
-            <text class="text-emerald">{{ sym(d.currency) }}{{ fmt(a.net) }}</text>
+            <text>{{ fmt(a.shares) }} 股 · 税率 {{ fmt(a.rate * 100) }}%</text>
+            <text class="text-emerald">{{ sym(d.currency) }}{{ fmt(a.gross) }}</text>
           </view>
         </view>
         <view v-else-if="openId === d.id" class="alloc">
@@ -168,7 +168,7 @@ async function load() {
   const [s, l, d] = await Promise.all([
     apiHoldingStats(id.value),
     apiLots(id.value),
-    apiDividends({ holding_id: id.value, page_size: 50, expand: 'allocations' }),
+    apiDividends({ holding_id: id.value, page_size: 50, expand: 'batches' }),
   ])
   st.value = s
   lots.value = l.items

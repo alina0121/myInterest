@@ -1,9 +1,14 @@
-"""持仓接口：CRUD + 计算字段（docs/04 §二）。"""
+"""持仓接口：CRUD + 计算字段（docs/04 §二）——v0.3 改为实时计算。
+
+v0.3 变更：
+- import 去掉 Dividend / DividendAllocation
+- delete_holding 不再级联删除分红（实时模式无落表），只删 Lot + Holding
+"""
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import Dividend, DividendAllocation, Holding, Lot, Security, User
+from ..models import Holding, Lot, Security, User
 from ..schemas import HoldingCreate, HoldingUpdate
 from ..services import lots_service, security_service
 from ..utils.errors import AppError, Codes, not_found, ok
@@ -137,15 +142,7 @@ def update_holding(holding_id: int, body: HoldingUpdate,
 def delete_holding(holding_id: int, session: Session = Depends(get_session),
                    user: User = Depends(get_current_user)):
     h = get_owned_holding(session, user, holding_id)
-    # 手动级联删除，顺序按外键依赖反着来：分红明细 → 分红 → 批次 → 持仓
-    # （SQLite 默认外键不强制 ON DELETE 连锁，且 allocations.lot_id 是 SET NULL，
-    #   整只持仓删时需要显式清干净，每步即时落库避免约束冲突）
-    divs = session.exec(select(Dividend).where(Dividend.holding_id == h.id)).all()
-    for d in divs:
-        for a in session.exec(select(DividendAllocation)
-                              .where(DividendAllocation.dividend_id == d.id)).all():
-            session.delete(a)
-        session.delete(d)
+    # v0.3：实时模式下分红不落表，不需要级联删除；只删批次 + 持仓
     for l in session.exec(select(Lot).where(Lot.holding_id == h.id)).all():
         session.delete(l)
     session.delete(h)

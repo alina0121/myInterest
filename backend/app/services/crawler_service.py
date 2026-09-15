@@ -31,7 +31,6 @@ _MARKET = "a_share"
 _CURRENCY = "CNY"
 
 _AV_URL = "https://www.alphavantage.co/query"
-_AV_FUN = "TIME_SERIES_MONTHLY_ADJUSTED"
 _US_CURRENCY = "USD"
 
 # A 股分页抓取安全上限：每页最多 500，最多 20 页 = 单次最多 1 万条，
@@ -77,6 +76,17 @@ def _confidence(ex: str | None, rec: str | None, pay: str | None) -> float:
     if ex:
         return 0.70
     return 0.60  # 连除权日都没有，基本只能当线索
+
+
+def _auto_status(pay_date: str | None, ex_date: str | None) -> str:
+    """爬虫入库状态（方案 A）：历史预案自动发布，未来预案待人工审核。
+
+    已到账（参考日早于今天）的分红是既成事实，无需审核，直接 published 展示给用户；
+    仍未到账的未来预案保持 pending，等管理员后台确认。
+    参考日优先用派息日（pay_date），缺省退回除权日（ex_date）。
+    """
+    ref = pay_date or ex_date
+    return "published" if ref and ref < today_str() else "pending"
 
 
 def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, int]:
@@ -202,7 +212,8 @@ def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, 
                 security_id=sec.id, market=_MARKET, code=it["code"],
                 ex_date=ex, record_date=rec, pay_date=pay, dps=dps,
                 div_type="cash", source="crawler",
-                confidence=_confidence(ex, rec, pay), status="pending",
+                confidence=_confidence(ex, rec, pay),
+                status=_auto_status(pay, ex),  # 历史已到账直接发布，未来待审核
                 raw_title=title[:200],  # 留痕：出问题可回溯是哪条公告
             ))
             page_inserts += 1
@@ -222,9 +233,11 @@ def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, 
 
 
 def crawl_us_stock(session: Session) -> tuple[int, int]:
-    """抓取美股分红预案（Alpha Vantage TIME_SERIES_MONTHLY_ADJUSTED）。
+    """抓取美股分红（Alpha Vantage）。
 
-    每月数据含 "7. dividend amount" 字段，非零即当月有分红。
+    优先用 DIVIDENDS 接口（返回精确的 ex_dividend_date/record_date/payment_date/
+    dividend_amount），彻底解决旧月度接口「月初近似除权日导致同月多笔误判重复」的缺陷；
+    该接口不可用（部分 key 不支持）时回退 TIME_SERIES_MONTHLY_ADJUSTED 月度汇总。
     API Key 取系统配置 av_api_key（后台可配），其次环境变量 XI_AV_API_KEY；
     未配置则跳过并日志提示。返回 (fetched, new_pending)。
     """
@@ -251,29 +264,55 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
     for i, ticker in enumerate(tickers):
         if i > 0 and sleep_sec > 0:
             time.sleep(sleep_sec)  # 限速间隔（后台可配）
+        sec = security_service.upsert_security(session, "us_stock", ticker, ticker, _US_CURRENCY)
+        # 主路径：精确 DIVIDENDS 接口
         try:
-            resp = httpx.get(_AV_URL, params={
-                "function": _AV_FUN, "symbol": ticker, "apikey": api_key,
+            data = _http_get_json(_AV_URL, {
+                "function": "DIVIDENDS", "symbol": ticker, "apikey": api_key,
             }, timeout=15.0)
-            resp.raise_for_status()
-            data = resp.json()
         except Exception as e:
-            log.info("av %s fetch failed: %s", ticker, e)
+            log.info("av %s dividends fetch failed: %s", ticker, e)
             continue
-
-        # Alpha Vantage 限流/错误时返回 "Note" 或 "Information" 字段
         if "Note" in data or "Information" in data:
             log.info("av %s rate limit: %s", ticker, data.get("Note") or data.get("Information"))
             continue
-
-        series = data.get("Monthly Adjusted Time Series") or {}
-        if not series:
-            log.info("av %s empty series", ticker)
+        entries = data.get("data")
+        # 精确接口可用（返回 data 数组）→ 逐笔精确入库
+        if isinstance(entries, list):
+            for e in entries:
+                ex = _clean_date(e.get("ex_dividend_date"))
+                try:
+                    amount = float(e.get("dividend_amount", 0) or 0)
+                except (TypeError, ValueError):
+                    continue
+                if not ex or amount <= 0:
+                    continue
+                fetched += 1
+                if session.exec(select(DividendSchedule).where(
+                        DividendSchedule.market == "us_stock",
+                        DividendSchedule.code == ticker,
+                        DividendSchedule.ex_date == ex)).first():
+                    continue
+                rec = _clean_date(e.get("record_date")) or ex
+                pay = _clean_date(e.get("payment_date")) or ex
+                session.add(DividendSchedule(
+                    security_id=sec.id, market="us_stock", code=ticker,
+                    ex_date=ex, record_date=rec, pay_date=pay,
+                    dps=round(amount, 4),
+                    div_type="cash", source="crawler",
+                    confidence=0.95,  # 官方精确日期 + 金额
+                    status=_auto_status(pay, ex),  # 历史已到账直接发布
+                    raw_title=f"{ticker} dividend ${amount}",
+                ))
+                new_pending += 1
+            session.commit()
             continue
 
+        # 回退路径：旧月度接口（DIVIDENDS 不可用 / 返回空 data）
+        series = data.get("Monthly Adjusted Time Series") or {}
+        if not series:
+            continue
         for date_str, item in series.items():
-            # AV 一次返回全部历史月线，全量入库（"按历史预测分红"需要足够样本）；
-            # 已存在（任意状态）的按 (代码, 近似除权日) 去重跳过。
             try:
                 amount = float(item.get("7. dividend amount", 0) or 0)
             except (TypeError, ValueError):
@@ -281,27 +320,25 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
             if amount <= 0:
                 continue  # 该月无分红
             fetched += 1
-            # 月线日期是月末，ex_date 实际在该月内；Alpha Vantage 不给精确 ex_date，用月初近似
+            # 月线日期是月末，AV 不给精确 ex_date，用月初近似
             ex_date = date_str[:8] + "01"
-            # 已存在（任意状态）→ 跳过
             if session.exec(select(DividendSchedule).where(
                     DividendSchedule.market == "us_stock",
                     DividendSchedule.code == ticker,
                     DividendSchedule.ex_date == ex_date)).first():
                 continue
-            sec = security_service.upsert_security(session, "us_stock", ticker, ticker, _US_CURRENCY)
             session.add(DividendSchedule(
                 security_id=sec.id, market="us_stock", code=ticker,
                 ex_date=ex_date, record_date=ex_date, pay_date=ex_date,
                 dps=round(amount, 4),
                 div_type="cash", source="crawler",
                 confidence=0.75,  # 月线日期不精确
-                status="pending",
+                status=_auto_status(ex_date, None),  # 历史月份已到账直接发布
                 raw_title=f"{ticker} monthly dividend ${amount}",
             ))
             new_pending += 1
+        session.commit()
 
-    session.commit()
     return fetched, new_pending
 
 
@@ -421,7 +458,7 @@ def crawl_hk_stock(session: Session) -> tuple[int, int]:
                 ex_date=ex, record_date=rec, pay_date=pay,
                 dps=round(amount, 4), div_type="cash", source="crawler",
                 confidence=0.85,  # 官方公告但需人工核对金额解析
-                status="pending",
+                status=_auto_status(pay, ex),  # 历史已到账直接发布，未来待审核
                 raw_title=str(row.get("PLAN_EXPLAIN") or f"{code} dividend")[:200],
             ))
             new_pending += 1
@@ -498,7 +535,7 @@ def crawl_fund(session: Session) -> tuple[int, int]:
                 ex_date=ex, record_date=rec or ex, pay_date=pay,
                 dps=round(dps, 4), div_type="cash", source="crawler",
                 confidence=0.90,  # 天天基金官方列表，字段完整
-                status="pending",
+                status=_auto_status(pay, ex),  # 历史已到账直接发布，未来待审核
                 raw_title=f"{name} 分红"[:200],
             ))
             page_inserts += 1

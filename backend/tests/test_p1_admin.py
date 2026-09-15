@@ -77,36 +77,33 @@ def test_admin_overview(client):
 
 
 def test_schedule_approve_and_auto_match(client):
-    """管理员录入预案 → 发布 → 全体用户 auto-match 生成 pending 分红。"""
+    """管理员录入预案 → 发布 → 用户分红列表实时可见（v0.3 实时计算模式）。"""
     admin_token = _make_admin(client, "admin_sch")
     user_token = register(client, "user_sch")
     hid = _create_holding_with_lot(client, user_token)
 
-    # 管理员录入预案（pending）
+    # 管理员录入预案（pending）—— 用远期日期确保 status=pending
+    future = "2099-06-01"
     r = client.post("/api/admin/schedules", headers=auth(admin_token), json={
         "market": "a_share", "code": "601398", "name": "工商银行",
-        "ex_date": "2026-09-10", "record_date": "2026-09-09",
-        "pay_date": "2026-09-10", "dps": 0.42}).json()
+        "ex_date": future, "record_date": "2099-05-31",
+        "pay_date": future, "dps": 0.42}).json()
     assert r["code"] == 0
     sid = r["data"]["id"]
     assert r["data"]["status"] == "pending"
 
-    # 发布 → 后台 auto-match 已为该用户生成 pending 分红
+    # 发布 → v0.3 实时模式：分红列表直接从预案 + 持仓实时派生，无需 auto-match 落表
     r = client.post(f"/api/admin/schedules/{sid}/approve", headers=auth(admin_token)).json()
     assert r["code"] == 0 and r["data"]["status"] == "published"
 
-    # 手动触发 auto-match 应为幂等（已存在 → matched=0）
-    r = client.post("/api/dividends/auto-match", headers=auth(user_token)).json()
-    assert r["code"] == 0
-    assert r["data"]["matched"] == 0
-
-    # 分红列表应存在 status=pending 的记录（由后台 auto-match 生成）
+    # 分红列表应存在 status=pending 的记录（实时计算）
     divs = client.get("/api/dividends?status=pending", headers=auth(user_token)).json()
+    assert divs["code"] == 0
     assert divs["data"]["total"] >= 1
-    pending = [d for d in divs["data"]["items"] if d["schedule_id"] is not None]
+    pending = [d for d in divs["data"]["items"] if d["schedule_id"] == sid]
     assert len(pending) == 1
     assert pending[0]["shares"] == 3000
-    assert pending[0]["source"] == "auto_schedule"
+    assert pending[0]["gross_amount"] == round(3000 * 0.42, 2)
 
 
 def test_schedule_reject(client):
@@ -345,12 +342,12 @@ def test_user_submit_config_gate(client):
 def test_forecast_freq_gate(client):
     """forecast_freq 关闭时不生成推算预案；开启后为季派/月派持仓生成。"""
     from app.database import engine
-    from app.models import Dividend, DividendSchedule, Holding, Lot
-    from app.services import config_service, schedule_service
+    from app.models import DividendSchedule
+    from app.services import config_service, schedule_service, security_service
     from sqlmodel import Session, select
 
     user_token = register(client, "usr_fc")
-    # 建一个季派持仓 + 一笔历史已确认分红
+    # 建一个季派持仓 + 一笔历史已确认分红（v0.3：写 DividendSchedule published + 过去 pay_date）
     hid = client.post("/api/holdings", headers=auth(user_token), json={
         "market": "a_share", "code": "601398", "name": "工商银行",
         "currency": "CNY", "freq": "quarterly",
@@ -358,9 +355,16 @@ def test_forecast_freq_gate(client):
     from datetime import date, timedelta
     pay = (date.today() - timedelta(days=80)).isoformat()
     with Session(engine) as s:
-        s.add(Dividend(user_id=_uid(client, user_token), holding_id=hid,
-                       ex_date=pay, record_date=pay, pay_date=pay, dps=0.26,
-                       status="confirmed", currency="CNY"))
+        # 先确保 securities 有记录
+        sec = security_service.upsert_security(s, "a_share", "601398", "工商银行", "CNY")
+        s.flush()
+        # v0.3：分红不落表，写一条 published 的 DividendSchedule（历史 pay_date → 实时算出 status=confirmed）
+        s.add(DividendSchedule(
+            security_id=sec.id, market="a_share", code="601398",
+            ex_date=pay, record_date=pay, pay_date=pay, dps=0.26,
+            currency="CNY", status="published", source="manual",
+            div_type="cash", confidence=1.0,
+            raw_title="test forecast freq gate"))
         s.commit()
 
     # 关闭：0 条

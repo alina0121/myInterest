@@ -1,15 +1,21 @@
-"""批次与持仓聚合服务（docs/03 §1）。
+"""批次与持仓聚合服务（docs/03 §1）——v0.3 改为实时计算。
 
 「当前持仓数量、平均成本、总投入」不落库，由批次实时聚合。
+
+v0.3 变更：
+- computed_summary 里 Dividend 落表查询改为调 dividend_service.list_user_dividends 实时派生
+- lot_out 里 DividendAllocation 落表查询（批次累计分红）在实时模式下不可从 lot 维度反查，
+  暂时返回 0.0（需额外设计实时归属反向索引）
 """
 from decimal import Decimal
 from datetime import date
 
 from sqlmodel import Session, select
 
-from ..models import Dividend, Holding, Lot
+from ..models import Holding, Lot
 from ..utils.errors import AppError, Codes
 from ..utils.timeutil import days_ago_iso, today_str
+from .dividend_service import list_user_dividends
 from .money import r2, r4
 
 BUY_DIRS = ("buy", "bonus_share")
@@ -88,16 +94,15 @@ def computed_summary(session: Session, h: Holding) -> dict:
     cost = cost_basis(lots)   # 当前持仓的加权平均成本（卖出按比例冲减）
     avg = r4(cost / now) if now > 0 else 0.0
 
-    divs = list(session.exec(
-        select(Dividend).where(Dividend.holding_id == h.id,
-                               Dividend.status == "confirmed")
-    ).all())
+    divs = [d for d in list_user_dividends(
+        session, h.user_id, year=None, market=None, want_batches=False)
+        if d["holding_id"] == h.id and d["status"] == "confirmed"]
     year = today_str()[:4]
-    year_dividend = r2(sum(d.gross_amount for d in divs if d.pay_date[:4] == year))
-    total_dividend = r2(sum(d.net_amount for d in divs))
+    year_dividend = r2(sum(float(d["gross_amount"]) for d in divs if d["pay_date"][:4] == year))
+    total_dividend = r2(sum(float(d["net_amount"]) for d in divs))
 
     # TTM 每股分红（每 share 口径）：近 365 天各次 dps 之和
-    ttm_dps = sum(d.dps for d in divs if d.pay_date >= days_ago_iso(365))
+    ttm_dps = sum(float(d["dps"]) for d in divs if d["pay_date"] >= days_ago_iso(365))
     yoc = r4(ttm_dps / avg) if avg > 0 and ttm_dps > 0 else 0.0
 
     return {
@@ -113,11 +118,11 @@ def computed_summary(session: Session, h: Holding) -> dict:
 
 
 def lot_out(session: Session, lot: Lot) -> dict:
-    """批次输出：含批次金额与该批次累计分红（docs/04 §3.1）。"""
-    from ..models import DividendAllocation
-    allocs = session.exec(
-        select(DividendAllocation).where(DividendAllocation.lot_id == lot.id)
-    ).all()
+    """批次输出：含批次金额与该批次累计分红（docs/04 §3.1）。
+
+    v0.3：实时模式下 DividendAllocation 已删除，无法从 lot 维度反查历史累计分红，
+    暂时 lot_dividend 返回 0.0（未来可从所有分红的 batches 里汇总）。
+    """
     # 批次金额：买入=成交额+费用；卖出批次的费用通常已在回款中扣除，此处不再加
     amount = lot.shares * lot.price + (lot.fee if lot.direction == "buy" else 0)
     return {
@@ -128,6 +133,6 @@ def lot_out(session: Session, lot: Lot) -> dict:
         "price": lot.price,
         "fee": lot.fee,
         "amount": r2(amount),
-        "lot_dividend": r2(sum(a.net for a in allocs)),  # 该批次历史累计分到的税后红利
+        "lot_dividend": 0.0,  # v0.3：实时模式下无法从 lot 维度反查，暂置 0
         "note": lot.note,
     }

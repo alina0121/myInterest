@@ -1,19 +1,24 @@
-"""分红预案服务（docs/04 §五、§4.6；docs/06 §3.2）。
+"""分红预案服务（docs/04 §五；docs/06 §3.2）——v0.3 改为实时计算。
 
-- auto-match：扫描已发布预案，为持有对应标的的用户生成 pending 分红（幂等）
 - estimate：按归属算法预估某持仓在某预案下的股数/税前/税后（不落库）
+- auto-match：v0.3 改为纯占位（实时模式下分红不落表）
 - generate_forecast_schedules：季派/月派持仓按历史派息节奏生成推算预案
 - check_dividend_reminders：派息日前 3 天/当天提醒检查
+
+v0.3 变更：
+- 删除 auto-match 里的落表逻辑（Dividend/DividendAllocation），改为返回空结果
+- generate_forecast_schedules 里 Dividend 查询改为调 dividend_service.list_user_dividends
 """
 import logging
 from datetime import date as Date, timedelta
 from sqlmodel import Session, select
 
-from ..models import (Dividend, DividendSchedule, Holding, Lot, User, UserSetting)
+from ..models import DividendSchedule, Holding, Lot, UserSetting
 from ..utils.timeutil import hold_days, today_str
 from . import config_service, security_service
-from .dividend_service import (BUY_DIRS, apply_allocation, compute_eligible,
-                               default_record_date, tax_rate_for)
+from .dividend_service import (BUY_DIRS, compute_eligible,
+                               default_record_date, tax_rate_for,
+                               list_user_dividends)
 from .money import r2, r4
 
 log = logging.getLogger("xi.schedule")
@@ -57,64 +62,16 @@ def estimate_for_holding(session: Session, holding: Holding,
 
 
 def auto_match(session: Session, user_id: int | None = None) -> dict:
-    """扫描已发布预案 → 为当前用户（或全体用户）生成 pending 分红（docs/04 §4.6）。
+    """v0.3：实时计算模式下 auto-match 已废弃（分红不落表）。
 
-    幂等：同 (holding, schedule) 只生成一次；登记日无持仓股数则跳过。
+    保留函数签名避免调用方报错，直接返回空结果。
     """
-    schedules = session.exec(
-        select(DividendSchedule)
-        .where(DividendSchedule.status == "published",
-               DividendSchedule.ex_date != None,  # noqa: E711
-               DividendSchedule.dps != None)  # noqa: E711  要素不全的预案不参与自动匹配
-        .order_by(DividendSchedule.ex_date)  # type: ignore
-    ).all()
-    if not schedules:
-        return {"matched": 0, "created": [], "skipped": 0}
-
-    # 一次性把用户持仓捞出来，按 (市场, 代码) 建索引，
-    # 避免「预案数 × 持仓数」地反复查库
-    holding_stmt = select(Holding)
-    if user_id is not None:
-        holding_stmt = holding_stmt.where(Holding.user_id == user_id)
-    holdings = session.exec(holding_stmt).all()
-    by_key: dict[tuple[str, str], list[Holding]] = {}
-    for h in holdings:
-        by_key.setdefault((h.market, h.code), []).append(h)  # 同一标的可能在多个账户持有
-
-    created, skipped, matched = [], 0, 0
-    for sch in schedules:
-        for holding in by_key.get((sch.market, sch.code), []):
-            # 用户关闭了「预案自动生成」则跳过（docs/02 §9）
-            setting = session.get(UserSetting, holding.user_id)
-            if setting and not setting.auto_match_schedule:
-                continue
-            # 幂等：该持仓已存在此预案生成的分红
-            exists = session.exec(select(Dividend).where(
-                Dividend.holding_id == holding.id,
-                Dividend.schedule_id == sch.id)).first()
-            if exists:
-                continue
-            # 登记日没有可参与分红的持仓（如股票已清仓）→ 跳过并计数
-            est = estimate_for_holding(session, holding, sch)
-            if est is None:
-                skipped += 1
-                continue
-            # 生成的是 pending（待到账）：派息实际到账后由用户确认转 confirmed
-            div = Dividend(
-                user_id=holding.user_id, holding_id=holding.id, schedule_id=sch.id,
-                ex_date=sch.ex_date, record_date=effective_record_date(sch, holding.market),
-                pay_date=sch.pay_date or sch.ex_date, dps=r4(sch.dps),
-                currency=holding.currency, div_type=sch.div_type,
-                source="auto_schedule", status="pending",
-            )
-            session.add(div)
-            session.flush()       # 先拿到 div.id，归属明细才能挂上去
-            apply_allocation(session, div)  # 预生成批次归属明细（预估税费）
-            created.append({"schedule_id": sch.id, "holding_id": holding.id,
-                            "net_amount": div.net_amount})
-            matched += 1
-    session.commit()
-    return {"matched": matched, "created": created, "skipped": skipped}
+    return {
+        "matched": 0,
+        "created": [],
+        "skipped": 0,
+        "note": "实时计算模式下 auto-match 已废弃，分红数据每次查询时实时派生",
+    }
 
 
 def auto_match_all_background() -> None:
@@ -150,6 +107,8 @@ def generate_forecast_schedules(session: Session) -> int:
     生成一条 pending 预案（source=forecast，需人工审核）。
     幂等：同 (market, code, ex_date) 已存在任意状态预案则跳过。
     返回生成条数。
+
+    v0.3 变更：已确认分红从 dividend_service.list_user_dividends 实时查询获取。
     """
     if not config_service.get_bool("forecast_freq"):
         return 0
@@ -158,18 +117,26 @@ def generate_forecast_schedules(session: Session) -> int:
     holdings = session.exec(select(Holding).where(
         Holding.freq.in_(("monthly", "quarterly")))).all()  # type: ignore
     created = 0
+    # 按 user_id 缓存分红列表，避免同一用户多持仓时重复实时计算
+    user_div_cache: dict[int, list[dict]] = {}
     for h in holdings:
-        days = interval_map[h.freq]
-        last_div = session.exec(
-            select(Dividend).where(Dividend.holding_id == h.id,
-                                   Dividend.status == "confirmed")
-            .order_by(Dividend.pay_date.desc())  # type: ignore
-        ).first()
-        if last_div is None or not last_div.pay_date:
+        if h.user_id not in user_div_cache:
+            user_div_cache[h.user_id] = list_user_dividends(
+                session, h.user_id, year=None, market=None, want_batches=False)
+        holding_divs = [d for d in user_div_cache[h.user_id]
+                        if d["holding_id"] == h.id and d["status"] == "confirmed"]
+        if not holding_divs:
+            continue
+        # 按 pay_date 倒序，取最近一条
+        holding_divs.sort(key=lambda d: d.get("pay_date") or "", reverse=True)
+        last_div = holding_divs[0]
+        last_pay_date = last_div.get("pay_date")
+        last_dps = last_div.get("dps")
+        if not last_pay_date or not last_dps:
             continue
         try:
-            next_pay = (Date.fromisoformat(last_div.pay_date)
-                        + timedelta(days=days)).isoformat()
+            next_pay = (Date.fromisoformat(last_pay_date)
+                        + timedelta(days=interval_map[h.freq])).isoformat()
         except ValueError:
             continue
         if next_pay <= today:
@@ -185,7 +152,7 @@ def generate_forecast_schedules(session: Session) -> int:
         session.add(DividendSchedule(
             security_id=sec.id, market=h.market, code=h.code,
             ex_date=next_pay, pay_date=next_pay,
-            dps=r4(last_div.dps),
+            dps=r4(float(last_dps)),
             div_type="cash", source="forecast",
             confidence=0.65, status="pending",
             raw_title=f"{h.name} {h.freq} 推算预案（基于历史派息节奏）"[:200],

@@ -1,13 +1,16 @@
-"""分红预案用户端接口（docs/04 §五）：即将到账 + 全市场查询 + 用户提交。"""
+"""分红预案用户端接口（docs/04 §五）：即将到账 + 全市场查询 + 用户提交——v0.3 改为实时计算。
+
+v0.3 变更：去掉 Dividend 落表引用，has_record 从实时分红列表查询。
+"""
 from datetime import date as Date
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import Dividend, DividendSchedule, Holding, Security, User
+from ..models import DividendSchedule, Holding, Security, User
 from ..schemas import ScheduleUserSubmitIn
-from ..services import config_service, fx_service, schedule_service, security_service
+from ..services import config_service, dividend_service, fx_service, schedule_service, security_service
 from ..utils.errors import AppError, Codes, ok
 from ..utils.timeutil import today_str
 from .deps import get_current_user
@@ -36,6 +39,11 @@ def upcoming(session: Session = Depends(get_session),
     items, month_total = [], 0.0
     month = today[:7]
     sec_map = security_service.security_map(session, [(s.market, s.code) for s in schedules])
+    # v0.3：一次性拉完所有实时分红，建好 (holding_id, schedule_id) 索引
+    all_real_time_divs = dividend_service.list_user_dividends(
+        session, user.id, year=None, market=None, want_batches=False)
+    div_index: set[tuple[int, int]] = {(d["holding_id"], d["schedule_id"])
+                                       for d in all_real_time_divs}
     for sch in schedules:
         holding = by_key.get((sch.market, sch.code))
         if holding is None:
@@ -46,10 +54,8 @@ def upcoming(session: Session = Depends(get_session),
         est = schedule_service.estimate_for_holding(session, holding, sch)
         if est is None:
             continue  # 登记日没有可参与的持仓（如登记日后才建仓）
-        # 该预案是否已生成过分红记录：前端据此隐藏「一键生成」按钮，避免重复
-        has_record = session.exec(select(Dividend).where(
-            Dividend.holding_id == holding.id,
-            Dividend.schedule_id == sch.id)).first() is not None
+        # v0.3：has_record 从实时分红索引查（与落表语义一致）
+        has_record = (holding.id, sch.id) in div_index
         sec = sec_map.get((sch.market, sch.code))
         sec_currency = sec.currency if sec else holding.currency
         items.append({

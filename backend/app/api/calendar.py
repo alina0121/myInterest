@@ -1,12 +1,15 @@
-"""分红日历接口（docs/04 §五）。"""
+"""分红日历接口（docs/04 §五）——v0.3 改为实时计算。
+
+v0.3 变更：分红数据从 Dividend 落表改为调 dividend_service.list_user_dividends 实时派生。
+"""
 import calendar as _cal
 
 from fastapi import APIRouter, Depends
 from sqlmodel import Session, select
 
 from ..database import get_session
-from ..models import Dividend, Holding, User
-from ..services import fx_service
+from ..models import Holding, User
+from ..services import dividend_service, fx_service
 from ..utils.errors import ok
 from .deps import get_current_user
 
@@ -30,45 +33,44 @@ def calendar(year: int, month: int, account: str | None = None,
         hold_query = hold_query.where(Holding.account == account)
     holdings = {h.id: h for h in session.exec(hold_query).all()}
     holding_ids = set(holdings.keys())
-    # 按【派息日】落在本月筛分红（含已到账 + 待到账）
-    divs = list(session.exec(
-        select(Dividend).where(Dividend.user_id == user.id,
-                               Dividend.pay_date >= start,
-                               Dividend.pay_date <= end)  # type: ignore
-    ).all())
+    # v0.3：实时分红列表，按派息日筛选本月
+    all_divs = dividend_service.list_user_dividends(
+        session, user.id, year=None, market=None, want_batches=False)
+    divs = [d for d in all_divs
+            if d.get("pay_date") and start <= d["pay_date"] <= end]
     # v8：只保留属于当前账户持仓的分红
-    divs = [d for d in divs if d.holding_id in holding_ids]
+    divs = [d for d in divs if d["holding_id"] in holding_ids]
 
     today = _date.today().isoformat()
     # days: {"15": [当天分红...], "28": [...]}，前端日历按「日」挂点
     days: dict[str, list] = {}
     confirmed_amt, pending_amt = 0.0, 0.0
     for d in divs:
-        day = str(int(d.pay_date[8:10]))  # 派息日的「几号」，去掉前导 0 方便前端 key
-        h = holdings.get(d.holding_id)
+        day = str(int(d["pay_date"][8:10]))  # 派息日的「几号」，去掉前导 0 方便前端 key
+        h = holdings.get(d["holding_id"])
         if h is None:
             continue
         # v8：按显示币种转换
         if not display_currency or display_currency == "CNY":
-            net_disp = float(fx_service.to_cny(session, d.net_amount, d.currency, d.pay_date))
-            gross_disp = float(fx_service.to_cny(session, d.gross_amount, d.currency, d.pay_date))
+            net_disp = float(fx_service.to_cny(session, d["net_amount"], d["currency"], d["pay_date"]))
+            gross_disp = float(fx_service.to_cny(session, d["gross_amount"], d["currency"], d["pay_date"]))
         elif display_currency == "ORIGINAL":
-            net_disp = float(d.net_amount)
-            gross_disp = float(d.gross_amount)
+            net_disp = float(d["net_amount"])
+            gross_disp = float(d["gross_amount"])
         else:
-            net_cny = float(fx_service.to_cny(session, d.net_amount, d.currency, d.pay_date))
+            net_cny = float(fx_service.to_cny(session, d["net_amount"], d["currency"], d["pay_date"]))
             net_disp = float(fx_service.from_cny(session, net_cny, display_currency, today))
-            gross_cny = float(fx_service.to_cny(session, d.gross_amount, d.currency, d.pay_date))
+            gross_cny = float(fx_service.to_cny(session, d["gross_amount"], d["currency"], d["pay_date"]))
             gross_disp = float(fx_service.from_cny(session, gross_cny, display_currency, today))
         days.setdefault(day, []).append({
             "holding_id": h.id, "holding_name": h.name, "code": h.code,
-            "dps": d.dps, "shares": d.eligible_shares,
-            "gross": d.gross_amount, "tax": d.tax, "net": d.net_amount,
+            "dps": d["dps"], "shares": d["eligible_shares"],
+            "gross": d["gross_amount"], "tax": d["tax"], "net": d["net_amount"],
             f"net_display": net_disp, "display_currency": display_currency or "CNY",
-            "currency": d.currency, "status": d.status,
+            "currency": d["currency"], "status": d["status"],
         })
         # 月合计口径不同：已到账算税后净收入；待到账只能算税前预估
-        if d.status == "confirmed":
+        if d["status"] == "confirmed":
             confirmed_amt += net_disp
         else:
             pending_amt += gross_disp

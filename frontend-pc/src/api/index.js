@@ -35,10 +35,11 @@ export const apiCreateLotsBatch = (id, lots) => post(`/api/holdings/${id}/lots/b
 export const apiUpdateLot = (lotId, payload) => httpPatch(`/api/lots/${lotId}`, payload)
 export const apiDeleteLot = (lotId) => del(`/api/lots/${lotId}`)
 
-// ---------- 分红 ----------
+// ---------- 分红（v0.3 纯实时计算，无落表） ----------
 export const apiDividends = (params) => get('/api/dividends', params)
-export const apiCreateDividend = (payload) => post('/api/dividends', payload)
-export const apiCreateDividendsBatch = (dividends) => post('/api/dividends/batch', { dividends })
+// 详情：query params schedule_id + holding_id
+export const apiDividendDetail = (scheduleId, holdingId) =>
+  get('/api/dividends/detail', { schedule_id: scheduleId, holding_id: holdingId })
 
 // ---------- 统计 ----------
 export const apiSummary = (params = {}) => get('/api/stats/summary', params)
