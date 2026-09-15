@@ -4,6 +4,18 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>攒息 - 时间的朋友</title>
+  <!-- 品牌 favicon：深蓝圆角底 + 白色"攒"字（内联 SVG，构建不丢失） -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='22' fill='%231e3a8a'/%3E%3Ctext x='50' y='70' font-size='58' text-anchor='middle' fill='%23ffffff' font-family='Microsoft YaHei,sans-serif' font-weight='700'%3E%E6%94%92%3C/text%3E%3C/svg%3E" />
+  <script>
+    // 手机访问 PC 站点时自动跳转到移动端（保留路由与参数）
+    // 管理后台（#/admin）除外：移动端 H5 无管理功能，避免跳转后白屏
+    ;(function () {
+      if (location.hostname !== 'www.icefun.cn') return
+      if (!/Android|iPhone|iPad|iPod|Mobile|Mobi/i.test(navigator.userAgent)) return
+      if (location.hash.indexOf('#/admin') === 0) return
+      location.replace('https://mobile.icefun.cn/' + location.search + location.hash)
+    })()
+  </script>
 </head>
 <body>
   <div id="app"></div>
