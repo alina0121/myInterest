@@ -1,7 +1,8 @@
 # 07 · 上线 Checklist
 
 > 面向 2核2G 个人服务器 + 个人域名部署。覆盖主体合规、配置加固、部署资产、发布前自检四部分。
-> 对应基线版本：v1.1（PC 独立端 + 美股/港股/基金爬虫 + 多市场行情）。
+> 当前基线：v0.3（分红实时计算重构：PC/H5 独立端 + 美股/港股/基金爬虫 + 多市场行情）。
+> 若从 v0.2.0 升级，注意查看 §7 的 v0.3 迁移说明（DROP 旧表 + 手动分红数据影响）。
 
 ---
 
@@ -208,7 +209,28 @@ WantedBy=multi-user.target
 ```
 
 - [ ] 手动跑一次备份命令验证路径存在
-- [ ] 数据库迁移：如已有线上数据，部署新版本前看 `02-数据库设计.md` 的迁移约定
+
+### 迁移（v0.2.0 → v0.3.0，分红实时计算重构）
+v0.3 删除了 `dividends` / `dividend_allocations` 两张落表，分红改为由 `dividend_schedules`(预案) + `lots`(批次) **实时派生**，不再落库。后端 `init_db()` 只调 `create_all`（不会 DROP 已存在表），因此旧表会残留，需手动清理：
+
+```bash
+# 在服务器后端目录执行（先停服务，防写锁）
+sqlite3 data/xi.db "PRAGMA foreign_keys=OFF;
+DROP TABLE IF EXISTS dividends;
+DROP TABLE IF EXISTS dividend_allocations;
+PRAGMA foreign_keys=ON;"
+# 若系统未装 sqlite3 CLI，可用 python：
+python - <<'PY'
+import sqlite3; c = sqlite3.connect('data/xi.db')
+c.execute('PRAGMA foreign_keys=OFF')
+for t in ('dividends','dividend_allocations'):
+    c.execute(f'DROP TABLE IF EXISTS {t}')
+c.execute('PRAGMA user_version=9')  # 标记已迁移到 v0.3 schema
+c.commit(); c.close()
+PY
+```
+
+> ⚠️ 业务影响：旧库 `dividends` 表里已有的手动录入分红记录在 v0.3 下**不再被读取**。升级前如需保留，建议先到后台导出/备份该表数据；否则视为清洗重建（用户分红一律按预案+持仓实时算出，无丢失风险）。
 
 ---
 
@@ -217,12 +239,15 @@ WantedBy=multi-user.target
 后端启动时 APScheduler 自动起（见 [scheduler.py](file:///d:/myProject/myInvestTools/backend/app/scheduler.py)），无需额外配置：
 
 - [ ] 汇率每日更新（frankfurter）
-- [ ] 分红预告自动匹配（已发布预案 → 生成用户 pending 分红）
-- [ ] 爬虫调度（A 股东财、港股腾讯行情、基金天天基金）
+- [ ] 爬虫调度（A 股东财、港股腾讯行情、基金天天基金、美股 Alpha Vantage）
+- [ ] v0.3：已**移除**「分红预告自动匹配成 pending 分红」任务——分红全部按预案+持仓实时计算，无落表任务
+
+> 美股爬虫需先在后台「系统参数配置」填入 `av_api_key`（Alpha Vantage），否则美股爬取直接跳过。见 [crawler_service.py](file:///d:/myProject/myInvestTools/backend/app/services/crawler_service.py) `crawl_us_stock`。
 
 验证：
 - [ ] 后端日志无 APScheduler 报错
 - [ ] 后台「调度管理」页可手动触发各市场爬取
+- [ ] 美股 `av_api_key` 已配置后可拉出精确历史分红（`DIVIDENDS` 接口）
 
 ---
 
@@ -235,7 +260,7 @@ WantedBy=multi-user.target
 - [ ] 概览页（Dashboard）：统计卡片有数据
 - [ ] 持仓页：列表展示，可筛选市场/账户
 - [ ] 持仓详情：多批次展示，成本/市值/浮动盈亏正确
-- [ ] 分红页：列表 + 分页，可按年/市场筛选
+- [ ] 分红页：列表 + 分页，可按年/市场筛选；（v0.3 只读）展开可见批次归属明细，**无**「记一笔分红/手动录入」按钮
 - [ ] 日历页：分红日期正确标注
 - [ ] 统计页：图表渲染，YoC/股息率正确
 - [ ] 设置页：币种切换、账户管理、邮箱绑定
