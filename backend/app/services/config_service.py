@@ -98,6 +98,9 @@ SPECS: dict[str, dict] = {
     "wx_secret": {
         "category": "登录方式", "type": _STR, "default": "", "env_key": "XI_WX_SECRET",
         "sensitive": True, "label": "微信小程序 Secret", "help": "小程序登录密钥；页面脱敏显示，留空保存表示不修改。"},
+    "wx_mock": {
+        "category": "登录方式", "type": _BOOL, "default": False, "env_key": "XI_WX_MOCK",
+        "label": "微信 Mock 模式", "help": "开启后用 code 直接当 openid（开发/测试），关闭则走真实 code2session；正常情况下保持关闭，仅在本地无 AppID/Secret 联调时开启。"},
 
     # ── 登录方式：邮件 / 短信 / 验证码参数 ─────────────────────────
     "mail_enabled": {

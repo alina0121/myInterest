@@ -156,11 +156,10 @@ def wx_login(body: WxLoginIn, request: Request,
 def _wx_code2openid(code: str) -> str | None:
     """调用微信 code2session 接口换取 openid；mock 模式直接返回 code。
 
-    mock 条件：环境变量 XI_WX_MOCK=1（测试/开发强制），
+    mock 条件：系统配置 wx_mock 开启（DB → 环境变量 XI_WX_MOCK=1），
     或后台未配置 wx_appid / wx_secret。
     """
-    import os
-    if os.getenv("XI_WX_MOCK", "") == "1":
+    if config_service.get_bool("wx_mock"):
         return code
     appid = config_service.get_text("wx_appid").strip()
     secret = config_service.get_text("wx_secret").strip()
