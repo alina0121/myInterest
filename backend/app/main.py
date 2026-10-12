@@ -39,6 +39,17 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=False,
                    allow_methods=["*"], allow_headers=["*"])
 
 
+@app.middleware("http")
+async def json_charset_utf8(request, call_next):
+    """JSON 响应补 charset=utf-8：Windows PowerShell 5.1 等客户端遇到无 charset 的
+    application/json 会按 ISO-8859-1 解码，导致中文乱码。"""
+    response = await call_next(request)
+    ct = response.headers.get("content-type", "")
+    if ct.split(";")[0].strip() == "application/json" and "charset" not in ct:
+        response.headers["content-type"] = "application/json; charset=utf-8"
+    return response
+
+
 # 统一响应包络：成功 {"code":0,...}，失败也走同一结构，前端只认 code 字段
 def _envelope(code: int, msg: str, status: int) -> JSONResponse:
     return JSONResponse(status_code=status,
