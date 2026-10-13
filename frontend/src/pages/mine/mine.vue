@@ -2,11 +2,14 @@
   <view class="page">
     <!-- #ifdef H5 --><WebLayout title="我的" subtitle="账户、汇率、提醒与数据" /><!-- #endif -->
 
-    <!-- 用户卡 -->
+    <!-- 用户卡（头像/昵称可点修改，参考 eatWhat 账户设置） -->
     <view class="profile-card">
-      <view class="avatar">{{ (user?.nickname || user?.username || '投')[0] }}</view>
-      <view class="profile-info">
-        <text class="nick">{{ user?.nickname || user?.username || '用户' }}</text>
+      <view class="avatar avatar-editable" @click="showAvatarPicker">
+        <text v-if="user?.avatar">{{ user.avatar }}</text>
+        <text v-else>{{ (user?.nickname || user?.username || '投')[0] }}</text>
+      </view>
+      <view class="profile-info" @click="showNicknameEdit">
+        <text class="nick">{{ user?.nickname || user?.username || '用户' }} <text class="edit-link">✎</text></text>
         <text class="profile-sub">数据按用户隔离 · 仅本人可见</text>
       </view>
     </view>
@@ -70,11 +73,12 @@
       </view>
     </view>
 
-    <!-- 绑定邮箱弹窗 -->
+    <!-- 绑定邮箱弹窗（已绑定时支持更换/解绑，参考 eatWhat） -->
     <view v-if="bindVisible" class="modal-mask" @click="bindVisible = false">
       <view class="modal-card" @click.stop>
-        <view class="modal-title">{{ user?.email ? '修改绑定邮箱' : '绑定邮箱' }}</view>
+        <view class="modal-title">{{ user?.email ? '修改 / 解绑邮箱' : '绑定邮箱' }}</view>
         <view class="modal-tip" v-if="!user?.email">绑定后可用邮箱验证码登录、找回密码；若邮箱已被其他账号使用，将合并数据到该账号下。</view>
+        <view class="modal-tip" v-else>当前已绑定 {{ user?.email }}；解绑后此邮箱可重新绑定或用于新账号注册。</view>
         <view class="field">
           <text class="f-label">邮箱</text>
           <input class="f-input" v-model="bindForm.email" placeholder="请输入邮箱" />
@@ -90,7 +94,37 @@
         </view>
         <view class="modal-actions">
           <button class="btn-cancel" @click="bindVisible = false">取消</button>
+          <button v-if="user?.email" class="btn-danger-plain" :loading="unbindLoading" @click="confirmUnbind">解绑当前</button>
           <button class="btn-confirm" :loading="bindLoading" @click="confirmBind">确认绑定</button>
+        </view>
+      </view>
+    </view>
+
+    <!-- 头像 emoji 候选弹窗（点选即保存，参考 eatWhat） -->
+    <view v-if="avatarVisible" class="modal-mask" @click="avatarVisible = false">
+      <view class="modal-card" @click.stop>
+        <view class="modal-title">选择头像</view>
+        <view class="emoji-grid">
+          <view v-for="em in AVATAR_POOL" :key="em"
+                :class="['emoji-cell', em === user?.avatar ? 'on' : '']"
+                @click="saveAvatar(em)">{{ em }}</view>
+        </view>
+        <view class="modal-actions">
+          <button class="btn-cancel" @click="avatarVisible = false">关闭</button>
+        </view>
+      </view>
+    </view>
+
+    <!-- 修改昵称弹窗 -->
+    <view v-if="nickVisible" class="modal-mask" @click="nickVisible = false">
+      <view class="modal-card" @click.stop>
+        <view class="modal-title">修改昵称</view>
+        <view class="field">
+          <input class="f-input" v-model="nickForm" placeholder="新的昵称" maxlength="20" />
+        </view>
+        <view class="modal-actions">
+          <button class="btn-cancel" @click="nickVisible = false">取消</button>
+          <button class="btn-confirm" :loading="nickLoading" @click="saveNickname">保存</button>
         </view>
       </view>
     </view>
@@ -100,6 +134,39 @@
       <view class="card logout-card" @click="logout">
         <SvgIcon name="logout" :size="36" />
         <text class="logout-text">退出登录</text>
+      </view>
+      <!-- 注销账户危险区（双确认：警告 → 输入「确认注销」，参考 eatWhat） -->
+      <view class="card danger-card" @click="showDelete">
+        <text class="danger-ic">⚠️</text>
+        <view class="danger-info">
+          <text class="danger-title">注销账户</text>
+          <text class="danger-sub">物理删除你的持仓、批次与账户，不可恢复</text>
+        </view>
+      </view>
+    </view>
+
+    <!-- 注销确认弹窗（双确认） -->
+    <view v-if="deleteVisible" class="modal-mask" @click="deleteVisible = false">
+      <view class="modal-card" @click.stop>
+        <template v-if="deleteStep === 1">
+          <view class="modal-title danger">⚠️ 确认注销？</view>
+          <view class="modal-tip">你的持仓、批次、分红记录与账户将被<text class="danger-text">全部物理删除，不可恢复</text>。确定要继续吗？</view>
+          <view class="modal-actions">
+            <button class="btn-cancel" @click="deleteVisible = false">再想想</button>
+            <button class="btn-danger" @click="deleteStep = 2">继续注销</button>
+          </view>
+        </template>
+        <template v-else>
+          <view class="modal-title danger">最后确认</view>
+          <view class="modal-tip">请输入 <text class="danger-text">确认注销</text> 来真的删除所有数据</view>
+          <view class="field">
+            <input class="f-input" v-model="deleteConfirmText" placeholder="输入：确认注销" />
+          </view>
+          <view class="modal-actions">
+            <button class="btn-cancel" @click="deleteVisible = false">取消</button>
+            <button class="btn-danger" :loading="deleteLoading" :disabled="deleteConfirmText !== '确认注销'" @click="doDelete">确认注销</button>
+          </view>
+        </template>
       </view>
     </view>
 
@@ -113,10 +180,14 @@ import { onShow } from '@dcloudio/uni-app'
 import {
   apiRates, apiSettings, apiSaveSettings, apiLogout,
   apiSendCode, apiBindEmail, apiMe, apiAccounts, apiAccountsMeta,
+  apiUpdateProfile, apiUnbindEmail, apiDeleteMe,
 } from '@/api'
 import { userStore, setAuth, clearAuth, syncFromSettings, setCurrentAccount } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
 import SvgIcon from '@/components/SvgIcon.vue'
+
+// 头像 emoji 候选池（投资主题，前端内置，参考 eatWhat 池化思路）
+const AVATAR_POOL = ['💰', '📈', '🐷', '🏦', '💹', '☕', '⚡', '🐉', '🍀', '📊', '🍵', '🏠']
 
 const user = computed(() => userStore.user)
 const rates = ref({})
@@ -256,6 +327,92 @@ function logout() {
     },
   })
 }
+
+// ---------- 个人资料（改昵称 / emoji 头像，参考 eatWhat） ----------
+const avatarVisible = ref(false)
+const nickVisible = ref(false)
+const nickLoading = ref(false)
+const nickForm = ref('')
+
+function showAvatarPicker() {
+  avatarVisible.value = true
+}
+
+async function saveAvatar(em) {
+  try {
+    const data = await apiUpdateProfile({ avatar: em })
+    userStore.user = { ...userStore.user, ...data.user }
+    avatarVisible.value = false
+    uni.showToast({ title: '头像已更新', icon: 'success' })
+  } catch (e) { /* toast 已统一 */ }
+}
+
+function showNicknameEdit() {
+  nickForm.value = user.value?.nickname || user.value?.username || ''
+  nickVisible.value = true
+}
+
+async function saveNickname() {
+  const v = nickForm.value.trim()
+  if (!v) return uni.showToast({ title: '昵称不能为空', icon: 'none' })
+  nickLoading.value = true
+  try {
+    const data = await apiUpdateProfile({ nickname: v })
+    userStore.user = { ...userStore.user, ...data.user }
+    nickVisible.value = false
+    uni.showToast({ title: '已保存', icon: 'success' })
+  } catch (e) { /* toast 已统一 */ } finally {
+    nickLoading.value = false
+  }
+}
+
+// ---------- 解绑邮箱（参考 eatWhat） ----------
+const unbindLoading = ref(false)
+
+function confirmUnbind() {
+  uni.showModal({
+    title: '确认解绑？',
+    content: '解绑后此邮箱可重新绑定或用于新账号注册',
+    success: async (r) => {
+      if (!r.confirm) return
+      unbindLoading.value = true
+      try {
+        const data = await apiUnbindEmail()
+        userStore.user = { ...userStore.user, ...data.user }
+        bindVisible.value = false
+        uni.showToast({ title: '已解绑', icon: 'success' })
+      } catch (e) { /* toast 已统一 */ } finally {
+        unbindLoading.value = false
+      }
+    },
+  })
+}
+
+// ---------- 注销账户（双确认：警告 → 输入「确认注销」，参考 eatWhat） ----------
+const deleteVisible = ref(false)
+const deleteStep = ref(1)
+const deleteConfirmText = ref('')
+const deleteLoading = ref(false)
+
+function showDelete() {
+  deleteStep.value = 1
+  deleteConfirmText.value = ''
+  deleteVisible.value = true
+}
+
+async function doDelete() {
+  if (deleteConfirmText.value !== '确认注销') return
+  deleteLoading.value = true
+  try {
+    await apiDeleteMe()
+    clearAuth()
+    deleteVisible.value = false
+    uni.showToast({ title: '已注销', icon: 'success' })
+    setTimeout(() => uni.reLaunch({ url: '/pages/login/login' }), 600)
+  } catch (e) { /* toast 已统一 */ } finally {
+    deleteLoading.value = false
+  }
+}
 </script>
 
 <style scoped>
@@ -272,10 +429,24 @@ function logout() {
   background: #dbeafe; color: #1e3a8a;
   text-align: center; line-height: 48rpx;
   font-size: 28rpx; font-weight: 700; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
 }
+.avatar-editable:active { opacity: 0.7; }
 .profile-info { flex: 1; min-width: 0; }
 .nick { display: block; font-size: 30rpx; font-weight: 600; color: #1e293b; }
+.edit-link { font-size: 24rpx; color: #2563eb; font-weight: 400; }
 .profile-sub { display: block; margin-top: 8rpx; font-size: 22rpx; color: #94a3b8; }
+
+/* 头像 emoji 候选网格（4 列，点选即保存，参考 eatWhat） */
+.emoji-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr); gap: 10rpx;
+  margin-bottom: 12rpx;
+}
+.emoji-cell {
+  text-align: center; font-size: 40rpx; height: 76rpx; line-height: 76rpx;
+  border: 1rpx solid #e2e8f0; border-radius: 10rpx; background: #f8fafc;
+}
+.emoji-cell.on { background: #1e3a8a; border-color: #1e3a8a; }
 
 /* 菜单卡 */
 .card {
@@ -347,6 +518,14 @@ function logout() {
 .btn-cancel { background: #f1f5f9; color: #64748b; }
 .btn-confirm { background: #1e3a8a; color: #fff; }
 .btn-cancel::after, .btn-confirm::after { border: none; }
+/* 危险操作按钮（解绑 / 注销） */
+.btn-danger-plain {
+  background: #fff; color: #dc2626; border: 1rpx solid #fecaca;
+}
+.btn-danger { background: #dc2626; color: #fff; }
+.btn-danger[disabled] { opacity: 0.4; }
+.btn-danger-plain::after, .btn-danger::after { border: none; }
+.danger-text { color: #dc2626; font-weight: 600; }
 
 /* 退出登录 */
 .logout-wrap { margin-top: 32rpx; padding: 0 8rpx; }
@@ -357,6 +536,18 @@ function logout() {
 }
 .logout-card:active { background: #f8fafc; }
 .logout-text { font-size: 28rpx; color: #dc2626; font-weight: 500; }
+
+/* 注销账户危险区（参考 eatWhat danger-zone） */
+.danger-card {
+  margin-top: 20rpx; padding: 26rpx 28rpx;
+  display: flex; align-items: center; gap: 18rpx;
+  background: #fff5f5; border: 1rpx solid #ffd6d6;
+}
+.danger-card:active { background: #ffecec; }
+.danger-ic { font-size: 34rpx; }
+.danger-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.danger-title { font-size: 28rpx; font-weight: 600; color: #dc2626; }
+.danger-sub { font-size: 22rpx; color: #c0392b; }
 
 /* #ifdef H5 */
 @media (min-width: 768px) {
