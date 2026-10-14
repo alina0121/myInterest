@@ -41,7 +41,11 @@ def send_code(target: str, code: str, purpose: str) -> None:
     sender = config_service.get_text("smtp_sender").strip() or user
     use_ssl = config_service.get_bool("smtp_use_ssl")
     if not host or not user or not password:
-        raise AppError(Codes.SERVER_ERROR, "邮件服务配置不完整", status=500)
+        # 开发期降级：SMTP 未配置完整时验证码打印到日志（参考 eatWhat），
+        # 生产环境配置完成后不会走到这里
+        log.warning("[mail] SMTP 配置不完整，验证码仅打印日志。to=%s purpose=%s code=%s",
+                    target, purpose, code)
+        return
 
     subject, body = _TEMPLATES.get(purpose, ("验证码", "您的验证码：{code}"))
     body = body.format(code=code)
@@ -64,8 +68,10 @@ def send_code(target: str, code: str, purpose: str) -> None:
                 s.sendmail(sender, [target], msg.as_string())
         log.info("mail sent to %s purpose=%s", target, purpose)
     except Exception as e:
-        # 失败仅日志，不抛错（BackgroundTasks 中抛错会被吞，且不应影响用户响应）
-        log.warning("mail send failed to %s: %s", target, e)
+        # 发送失败仅日志（BackgroundTasks 中抛错会被吞），同时打印验证码兜底，
+        # 避免码已入库却无人能拿到（本地开发/SMTP 故障时可从日志取码）
+        log.warning("[mail] send failed to %s: %s（降级打印验证码 code=%s）",
+                    target, e, code)
 
 
 def send_test(target: str) -> tuple[bool, str]:

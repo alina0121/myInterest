@@ -20,6 +20,10 @@ export const apiResetPassword = (email, code, newPassword) =>
   post('/api/auth/reset-password', { email, code, new_password: newPassword }, { auth: false })
 export const apiBindEmail = (email, code) =>
   post('/api/auth/bind-email', { email, code })
+// 个人资料 / 解绑邮箱 / 注销账户（对齐 eatWhat 账户设置）
+export const apiUpdateProfile = (payload) => put('/api/auth/profile', payload)
+export const apiUnbindEmail = () => post('/api/auth/unbind-email')
+export const apiDeleteMe = () => del('/api/auth/me')
 
 // ---------- 持仓 ----------
 export const apiHoldings = (params = {}) => get('/api/holdings', params)

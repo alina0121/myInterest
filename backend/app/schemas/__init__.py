@@ -58,6 +58,12 @@ class EmailRegisterIn(BaseModel):
     password: Optional[str] = Field(default=None, min_length=8)
 
 
+class ProfileIn(BaseModel):
+    """修改个人资料：昵称 / 头像（emoji），至少传一项"""
+    nickname: Optional[str] = Field(default=None, max_length=32)
+    avatar: Optional[str] = Field(default=None, max_length=32)
+
+
 class ResetPasswordIn(BaseModel):
     """找回密码：邮箱 + 验证码 + 新密码"""
     email: str = Field(min_length=4)

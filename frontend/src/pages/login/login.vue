@@ -7,43 +7,19 @@
     </view>
 
     <view class="login-card">
-      <view class="tabs">
-        <view :class="['tab', mode === 'pwd' ? 'active' : '']" @click="mode = 'pwd'">密码登录</view>
-        <view :class="['tab', mode === 'email' ? 'active' : '']" @click="mode = 'email'">邮箱验证码</view>
-        <!-- #ifdef MP-WEIXIN -->
-        <view :class="['tab', mode === 'wx' ? 'active' : '']" @click="mode = 'wx'">微信</view>
-        <!-- #endif -->
-      </view>
-
-      <!-- 密码登录 / 注册 -->
-      <view v-if="mode === 'pwd'" class="form">
-        <view class="field">
-          <text class="f-label">{{ subMode === 'login' ? '账号' : '用户名' }}</text>
-          <input class="f-input" v-model="pwdForm.account" placeholder="用户名 / 邮箱（注册时为用户名）" />
-        </view>
-        <view v-if="subMode === 'register'" class="field">
-          <text class="f-label">邮箱</text>
-          <input class="f-input" v-model="pwdForm.email" placeholder="选填" />
-        </view>
-        <view class="field">
-          <text class="f-label">密码</text>
-          <input class="f-input" v-model="pwdForm.password" password placeholder="至少 8 位" />
-        </view>
-        <view v-if="subMode === 'register'" class="field">
-          <text class="f-label">昵称</text>
-          <input class="f-input" v-model="pwdForm.nickname" placeholder="选填" />
-        </view>
-        <button class="btn-primary submit" :loading="loading" @click="submitPwd">
-          {{ subMode === 'login' ? '登 录' : '注 册' }}
+      <!-- 微信小程序端：一键登录（必须用户点击触发；H5/App 不编译此块） -->
+      <!-- #ifdef MP-WEIXIN -->
+      <view class="wx-block">
+        <button class="btn-wx" :loading="wxLoading" @click="onWxLogin">
+          <text class="wx-icon">✦</text> 微信一键登录
         </button>
-        <view class="hint">
-          <text v-if="subMode === 'login'">还没有账号？<text class="link" @click="subMode = 'register'">立即注册</text></text>
-          <text v-else>已有账号？<text class="link" @click="subMode = 'login'">返回登录</text></text>
-        </view>
+        <view class="hint wx-hint">登录后可在「我的」中绑定邮箱</view>
+        <view class="divider"><text class="divider-text">或 用邮箱验证码登录</text></view>
       </view>
+      <!-- #endif -->
 
-      <!-- 邮箱验证码登录 / 注册 -->
-      <view v-else-if="mode === 'email'" class="form">
+      <!-- 邮箱验证码：登录/注册合一（未注册邮箱自动建号，参考 eatWhat） -->
+      <view class="form">
         <view class="field">
           <text class="f-label">邮箱</text>
           <input class="f-input" v-model="emailForm.email" placeholder="请输入邮箱地址" />
@@ -52,45 +28,15 @@
           <text class="f-label">验证码</text>
           <view class="code-row">
             <input class="f-input code-input" v-model="emailForm.code" placeholder="6 位验证码" />
-            <button class="btn-code" :disabled="cooldown > 0" @click="sendCode('email')">
+            <button class="btn-code" :disabled="cooldown > 0" @click="sendCode">
               {{ cooldown > 0 ? `${cooldown}s` : '获取验证码' }}
             </button>
           </view>
         </view>
-        <view v-if="subMode === 'register'" class="field">
-          <text class="f-label">昵称（选填）</text>
-          <input class="f-input" v-model="emailForm.nickname" placeholder="留空则用邮箱前缀" />
-        </view>
-        <view v-if="subMode === 'register'" class="field">
-          <text class="f-label">密码（选填）</text>
-          <input class="f-input" v-model="emailForm.password" password placeholder="设密码后可用密码登录" />
-        </view>
         <button class="btn-primary submit" :loading="loading" @click="submitEmail">
-          {{ subMode === 'login' ? '登 录' : '注 册' }}
+          登录 / 注册
         </button>
-        <view class="hint">
-          <text v-if="subMode === 'login'">没有账号？<text class="link" @click="subMode = 'register'">立即注册</text></text>
-          <text v-else>已有账号？<text class="link" @click="subMode = 'login'">返回登录</text></text>
-        </view>
-      </view>
-
-      <!-- 微信小程序端：一键登录（docs/05 §3 微信登录，必须用户点击触发） -->
-      <!-- #ifdef MP-WEIXIN -->
-      <view v-else class="form">
-        <view class="wx-tip">点击下方按钮使用微信一键登录</view>
-        <button class="btn-wx" :loading="wxLoading" @click="onWxLogin">
-          <text class="wx-icon">✦</text> 微信一键登录
-        </button>
-        <view class="hint">登录后可在「我的」中绑定邮箱</view>
-      </view>
-      <!-- #endif -->
-
-      <!-- 切换其他登录方式 -->
-      <view class="divider" v-if="mode !== 'wx'"><text class="divider-text">其他方式</text></view>
-      <view class="other-methods" v-if="mode !== 'wx'">
-        <!-- #ifdef MP-WEIXIN -->
-        <text class="link-small" @click="mode = 'wx'">微信登录</text>
-        <!-- #endif -->
+        <view class="hint">未注册的邮箱验证通过后将自动创建账号</view>
       </view>
     </view>
   </view>
@@ -98,60 +44,22 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import {
-  apiLogin, apiRegister, apiWxLogin,
-  apiSendCode, apiEmailLogin, apiEmailRegister,
-} from '@/api'
+import { apiWxLogin, apiSendCode, apiEmailLogin } from '@/api'
 import { setAuth } from '@/store/user'
 
-const mode = ref('pwd')        // pwd / email / wx
-const subMode = ref('login')   // login / register
 const loading = ref(false)
 const wxLoading = ref(false)
 const cooldown = ref(0)
 
-const pwdForm = reactive({ account: '', email: '', password: '', nickname: '' })
-const emailForm = reactive({ email: '', code: '', nickname: '', password: '' })
+const emailForm = reactive({ email: '', code: '' })
 
-// ---------- 密码登录/注册 ----------
-async function submitPwd() {
-  if (!pwdForm.account || !pwdForm.password) {
-    return uni.showToast({ title: '请填写账号和密码', icon: 'none' })
-  }
-  if (subMode.value === 'register' && pwdForm.password.length < 8) {
-    return uni.showToast({ title: '密码至少 8 位', icon: 'none' })
-  }
-  loading.value = true
-  try {
-    let data
-    if (subMode.value === 'login') {
-      data = await apiLogin(pwdForm.account, pwdForm.password)
-    } else {
-      data = await apiRegister({
-        username: pwdForm.account,
-        email: pwdForm.email || null,
-        password: pwdForm.password,
-        nickname: pwdForm.nickname || pwdForm.account,
-      })
-    }
-    setAuth(data.access_token, data.user)
-    uni.showToast({ title: subMode.value === 'login' ? '登录成功' : '注册成功', icon: 'success' })
-    setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 400)
-  } catch (e) {
-    // 错误 toast 已由 request 统一处理
-  } finally {
-    loading.value = false
-  }
-}
-
-// ---------- 邮箱验证码 ----------
-async function sendCode(channel) {
-  if (channel === 'email' && !emailForm.email) {
+// ---------- 邮箱验证码（登录/注册合一） ----------
+async function sendCode() {
+  if (!emailForm.email) {
     return uni.showToast({ title: '请先填写邮箱', icon: 'none' })
   }
   try {
-    const purpose = subMode.value === 'register' ? 'register' : 'login'
-    await apiSendCode(channel, emailForm.email, purpose)
+    await apiSendCode('email', emailForm.email, 'login')
     uni.showToast({ title: '验证码已发送', icon: 'none' })
     // 启动 60 秒倒计时
     cooldown.value = 60
@@ -170,19 +78,10 @@ async function submitEmail() {
   }
   loading.value = true
   try {
-    let data
-    if (subMode.value === 'login') {
-      data = await apiEmailLogin(emailForm.email, emailForm.code)
-    } else {
-      data = await apiEmailRegister({
-        email: emailForm.email,
-        code: emailForm.code,
-        nickname: emailForm.nickname || null,
-        password: emailForm.password || null,
-      })
-    }
+    // 未注册邮箱由后端自动建号，无需区分登录/注册
+    const data = await apiEmailLogin(emailForm.email, emailForm.code)
     setAuth(data.access_token, data.user)
-    uni.showToast({ title: subMode.value === 'login' ? '登录成功' : '注册成功', icon: 'success' })
+    uni.showToast({ title: data.is_new_user ? '注册并登录成功' : '登录成功', icon: 'success' })
     setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 400)
   } catch (e) {
     // 错误已统一处理
@@ -191,7 +90,7 @@ async function submitEmail() {
   }
 }
 
-// ---------- 微信小程序一键登录 ----------
+// ---------- 微信小程序一键登录（仅 MP-WEIXIN 编译，H5/App 不存在该函数调用） ----------
 async function onWxLogin() {
   if (wxLoading.value) return
   wxLoading.value = true
@@ -239,17 +138,7 @@ async function onWxLogin() {
 .slogan { font-size: 26rpx; opacity: 0.85; margin-top: 12rpx; }
 .login-card {
   background: #fff; border-radius: 28rpx; margin: 0 40rpx;
-  padding: 20rpx 40rpx 50rpx; box-shadow: 0 12rpx 40rpx rgba(30,58,138,0.12);
-}
-.tabs { display: flex; border-bottom: 1rpx solid #f1f5f9; }
-.tab {
-  flex: 1; text-align: center; padding: 30rpx 0; font-size: 30rpx;
-  color: #94a3b8; position: relative;
-}
-.tab.active { color: #1e3a8a; font-weight: 600; }
-.tab.active::after {
-  content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
-  width: 60rpx; height: 6rpx; border-radius: 3rpx; background: #1e3a8a;
+  padding: 44rpx 40rpx 50rpx; box-shadow: 0 12rpx 40rpx rgba(30,58,138,0.12);
 }
 .field { padding: 26rpx 0; border-bottom: 1rpx solid #f1f5f9; }
 .f-label { display: block; font-size: 24rpx; color: #94a3b8; margin-bottom: 12rpx; }
@@ -268,20 +157,8 @@ async function onWxLogin() {
 .btn-code[disabled] { background: #94a3b8; }
 .btn-code::after { border: none; }
 
-.wx-tip { padding: 40rpx 0; font-size: 26rpx; color: #94a3b8; text-align: center; }
-
-.divider {
-  display: flex; align-items: center; margin: 40rpx 0 24rpx;
-}
-.divider::before, .divider::after {
-  content: ''; flex: 1; height: 1rpx; background: #e2e8f0;
-}
-.divider-text {
-  padding: 0 20rpx; font-size: 24rpx; color: #94a3b8;
-}
-.other-methods { text-align: center; }
-.link-small { font-size: 26rpx; color: #1e3a8a; }
-
+/* 微信一键登录块（仅小程序渲染） */
+.wx-block { margin-bottom: 10rpx; }
 .btn-wx {
   background: #07c160; color: #fff; border-radius: 44rpx;
   font-size: 30rpx; height: 88rpx; line-height: 88rpx; text-align: center;
@@ -289,6 +166,15 @@ async function onWxLogin() {
 }
 .btn-wx::after { border: none; }
 .wx-icon { margin-right: 10rpx; font-size: 32rpx; }
+.wx-hint { margin-top: 20rpx; }
+
+.divider { display: flex; align-items: center; margin: 34rpx 0 6rpx; }
+.divider::before, .divider::after {
+  content: ''; flex: 1; height: 1rpx; background: #e2e8f0;
+}
+.divider-text {
+  padding: 0 20rpx; font-size: 24rpx; color: #94a3b8;
+}
+
 .hint { text-align: center; margin-top: 28rpx; font-size: 26rpx; color: #94a3b8; }
-.link { color: #1e3a8a; }
 </style>

@@ -13,10 +13,10 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from sqlmodel import Session, or_, select
 
 from ..database import get_session
-from ..models import Holding, Lot, User, UserSetting
+from ..models import Feedback, Holding, Lot, User, UserSetting
 from ..schemas import (BindEmailIn, EmailLoginIn, EmailRegisterIn, LoginIn,
-                       RefreshIn, RegisterIn, ResetPasswordIn, SendCodeIn,
-                       WxLoginIn)
+                       ProfileIn, RefreshIn, RegisterIn, ResetPasswordIn,
+                       SendCodeIn, WxLoginIn)
 from ..services import config_service, mail_service, sms_service, verify_code_service
 from ..utils.errors import AppError, Codes, ok
 from ..utils.security import (create_refresh_token, decode_token, hash_password,
@@ -219,10 +219,11 @@ def send_code(body: SendCodeIn, request: Request,
     if body.purpose == "register":
         if session.exec(select(User).where(User.email == body.target)).first():
             raise AppError(Codes.USER_EXISTS, "该邮箱已注册", status=409)
-    elif body.purpose in ("login", "reset"):
+    elif body.purpose == "reset":
         if not session.exec(select(User).where(User.email == body.target)).first():
             # 出于隐私不暴露存在性，但也不发码（避免被探测）
             raise AppError(Codes.NOT_FOUND, "该邮箱未注册", status=404)
+    # login 不做存在性检查：未注册邮箱也发码，配合 /email-login 自动建号（登录/注册合一）
 
     # 生成并存表（含频率限制：同目标 code_send_interval_sec 秒内不可重发）
     code = verify_code_service.generate_and_store(body.channel, body.target, body.purpose)
@@ -238,18 +239,38 @@ def send_code(body: SendCodeIn, request: Request,
 @router.post("/email-login")
 def email_login(body: EmailLoginIn, request: Request,
                 session: Session = Depends(get_session)):
-    """邮箱验证码登录：校验 → 查 email → 返回 token pair；邮箱未注册返回 404。"""
+    """邮箱验证码"登录/注册"合一：未注册邮箱自动建号（参考 eatWhat 的 upsert 模式）。
+
+    已注册 → 正常登录；未注册 → 以邮箱前缀为 username 建号后登录，
+    返回 is_new_user 供前端区分提示文案（对齐 wx-login 字段命名）。
+    """
     _rate_limit(request)
     verify_code_service.verify("email", body.email, body.code, "login")
     user = session.exec(select(User).where(User.email == body.email)).first()
+    is_new = False
     if user is None:
-        raise AppError(Codes.NOT_FOUND, "该邮箱未注册，请先注册", status=404)
+        # 未注册 → 自动建号：username=邮箱前缀，冲突加随机后缀；随机密码（仅验证码登录）
+        base = body.email.split("@")[0]
+        username = base
+        while session.exec(select(User).where(User.username == username)).first():
+            username = base + "_" + secrets.token_hex(2)
+        user = User(
+            username=username, email=body.email,
+            password_hash=hash_password(secrets.token_urlsafe(16)),
+            nickname=base,
+        )
+        session.add(user)
+        session.flush()
+        session.add(UserSetting(user_id=user.id))
+        is_new = True
     if user.status == "banned":
         raise AppError(Codes.FORBIDDEN, "账号已封禁，请联系管理员", status=403)
     user.last_login_at = now_str()
     session.add(user)
     session.commit()
-    return ok({"user": _user_out(user), **token_pair(user.id)})
+    session.refresh(user)
+    return ok({"user": _user_out(user), "is_new_user": is_new,
+               **token_pair(user.id)})
 
 
 @router.post("/email-register")
@@ -388,3 +409,69 @@ def bind_email(body: BindEmailIn, request: Request,
     session.refresh(user_b)
     return ok({"merged": True, "user": _user_out(user_b),
                **token_pair(user_b.id)})
+
+
+# ---------------- 个人资料 / 解绑邮箱 / 注销账户（参考 eatWhat 账户设置） ----------------
+
+
+@router.put("/profile")
+def update_profile(body: ProfileIn,
+                   session: Session = Depends(get_session),
+                   user: User = Depends(get_current_user)):
+    """修改昵称/头像（emoji）。昵称截 20 字；头像传空串表示清除，限 32 字符。"""
+    if body.nickname is None and body.avatar is None:
+        raise AppError(Codes.VALIDATION, "昵称与头像至少填写一项", status=400)
+    if body.nickname is not None:
+        nickname = body.nickname.strip()
+        if not nickname:
+            raise AppError(Codes.VALIDATION, "昵称不能为空", status=400)
+        user.nickname = nickname[:20]
+    if body.avatar is not None:
+        user.avatar = body.avatar[:32]
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    return ok({"user": _user_out(user)})
+
+
+@router.post("/unbind-email")
+def unbind_email(session: Session = Depends(get_session),
+                 user: User = Depends(get_current_user)):
+    """解绑邮箱：解绑后该邮箱可重新绑定或用于新账号注册。"""
+    if not user.email:
+        raise AppError(Codes.VALIDATION, "当前账号未绑定邮箱", status=400)
+    user.email = ""
+    session.add(user)
+    session.commit()
+    return ok({"user": _user_out(user)})
+
+
+@router.delete("/me")
+def delete_my_account(session: Session = Depends(get_session),
+                      user: User = Depends(get_current_user)):
+    """注销账户：物理删除名下全部数据（批次→持仓→反馈→设置→账号），不可恢复。
+
+    管理员账号不可自助注销，防止误删运营账号（与 eatWhat 一致）。
+    注意：表间只有裸外键、无 Relationship，SQLAlchemy 的 unit of work
+    不感知其依赖，必须每类删完立即 flush 固定 SQL 顺序，否则
+    DELETE FROM users 可能被排到前面导致外键约束失败。
+    """
+    if user.role in ("admin", "super_admin"):
+        raise AppError(Codes.FORBIDDEN, "管理员账号不可自助注销", status=403)
+    lots = session.exec(select(Lot).where(Lot.user_id == user.id)).all()
+    for lot in lots:
+        session.delete(lot)
+    holdings = session.exec(select(Holding).where(Holding.user_id == user.id)).all()
+    for holding in holdings:
+        session.delete(holding)
+    feedbacks = session.exec(select(Feedback).where(Feedback.user_id == user.id)).all()
+    for feedback in feedbacks:
+        session.delete(feedback)
+    setting = session.get(UserSetting, user.id)
+    if setting:
+        session.delete(setting)
+    session.flush()  # 先发出 DELETE FROM lots/holdings/feedback/user_settings
+    session.delete(user)
+    session.commit()
+    return ok({"deleted": {"lots": len(lots), "holdings": len(holdings),
+                           "feedbacks": len(feedbacks)}})
