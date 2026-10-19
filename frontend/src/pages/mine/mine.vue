@@ -10,33 +10,44 @@
       </view>
       <view class="profile-info" @click="showNicknameEdit">
         <text class="nick">{{ user?.nickname || user?.username || '用户' }} <text class="edit-link">✎</text></text>
+        <text v-if="isAdmin" class="admin-badge">管理员</text>
         <text class="profile-sub">数据按用户隔离 · 仅本人可见</text>
       </view>
     </view>
 
-    <!-- 功能菜单 -->
+    <!-- 功能菜单（参考 eatWhat：emoji 图标 + 标题/副标题双行 + 大号字） -->
     <view class="card menu-card">
       <!-- v8：当前账户切换（统一入口，含账户管理） -->
       <view class="menu-row" @click="showAccountSwitch">
-        <SvgIcon name="account" :size="40" />
-        <text class="m-label">账户切换</text>
-        <text class="m-sub-text">{{ currentAccountText }}</text>
-        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
+        <text class="m-ic">🔁</text>
+        <view class="m-main">
+          <text class="m-label">账户切换</text>
+          <text class="m-sub-text">当前：{{ currentAccountText }}</text>
+        </view>
+        <text class="m-arrow">›</text>
       </view>
       <view class="menu-row" @click="go('/pages/stats/stats')">
-        <SvgIcon name="stats" :size="40" />
-        <text class="m-label">统计分析</text>
-        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
+        <text class="m-ic">📊</text>
+        <view class="m-main">
+          <text class="m-label">统计分析</text>
+          <text class="m-sub-text">分红趋势 · 收益率 · 市场分布</text>
+        </view>
+        <text class="m-arrow">›</text>
       </view>
       <view class="menu-row" @click="showBindEmail">
-        <SvgIcon name="bell" :size="40" />
-        <text class="m-label">绑定邮箱</text>
-        <text class="m-sub-text">{{ user?.email || '未绑定' }}</text>
-        <SvgIcon name="arrow-right" :size="32" class="m-arrow" />
+        <text class="m-ic">📧</text>
+        <view class="m-main">
+          <text class="m-label">绑定邮箱</text>
+          <text class="m-sub-text">{{ user?.email || '未绑定 · 可用于登录找回' }}</text>
+        </view>
+        <text class="m-arrow">›</text>
       </view>
       <view class="menu-row no-border" @click="toggleRemind">
-        <SvgIcon name="bell" :size="40" />
-        <text class="m-label">分红提醒</text>
+        <text class="m-ic">🔔</text>
+        <view class="m-main">
+          <text class="m-label">分红提醒</text>
+          <text class="m-sub-text">分红到账日提醒</text>
+        </view>
         <text :class="['m-status', settings.remind_on_payday ? 'on' : 'off']">
           {{ settings.remind_on_payday ? '已开启' : '未开启' }}
         </text>
@@ -132,11 +143,11 @@
     <!-- 退出登录 -->
     <view class="logout-wrap">
       <view class="card logout-card" @click="logout">
-        <SvgIcon name="logout" :size="36" />
+        <text class="logout-ic">🚪</text>
         <text class="logout-text">退出登录</text>
       </view>
-      <!-- 注销账户危险区（双确认：警告 → 输入「确认注销」，参考 eatWhat） -->
-      <view class="card danger-card" @click="showDelete">
+      <!-- 注销账户危险区（双确认：警告 → 输入「确认注销」，参考 eatWhat；管理员不可自助注销，不显示入口） -->
+      <view v-if="!isAdmin" class="card danger-card" @click="showDelete">
         <text class="danger-ic">⚠️</text>
         <view class="danger-info">
           <text class="danger-title">注销账户</text>
@@ -171,12 +182,13 @@
     </view>
 
     <view style="height: 140rpx"></view>
+    <!-- #ifdef H5 --><CustomTab current="/pages/mine/mine" /><!-- #endif -->
   </view>
 </template>
 
 <script setup>
 import { computed, reactive, ref } from 'vue'
-import { onShow } from '@dcloudio/uni-app'
+import { onLoad, onShow } from '@dcloudio/uni-app'
 import {
   apiRates, apiSettings, apiSaveSettings, apiLogout,
   apiSendCode, apiBindEmail, apiMe, apiAccounts, apiAccountsMeta,
@@ -184,12 +196,14 @@ import {
 } from '@/api'
 import { userStore, setAuth, clearAuth, syncFromSettings, setCurrentAccount } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
-import SvgIcon from '@/components/SvgIcon.vue'
+import CustomTab from '@/components/CustomTab.vue'
 
 // 头像 emoji 候选池（投资主题，前端内置，参考 eatWhat 池化思路）
 const AVATAR_POOL = ['💰', '📈', '🐷', '🏦', '💹', '☕', '⚡', '🐉', '🍀', '📊', '🍵', '🏠']
 
 const user = computed(() => userStore.user)
+// 管理员徽标展示 + 隐藏注销入口（对齐 eatWhat：管理员不可自助注销）
+const isAdmin = computed(() => ['admin', 'super_admin'].includes(user.value?.role || ''))
 const rates = ref({})
 const settings = reactive({})
 // v8：账户切换
@@ -222,6 +236,11 @@ async function load() {
   } catch (e) {}
 }
 onShow(load)
+
+// 微信新用户登录后 reLaunch 到本页 ?bind=1：自动弹出绑定邮箱引导（对齐 eatWhat redirect=bind）
+onLoad((options) => {
+  if (options?.bind === '1') showBindEmail()
+})
 
 // v8：账户切换
 function showAccountSwitch() {
@@ -435,6 +454,11 @@ async function doDelete() {
 .profile-info { flex: 1; min-width: 0; }
 .nick { display: block; font-size: 30rpx; font-weight: 600; color: #1e293b; }
 .edit-link { font-size: 24rpx; color: #2563eb; font-weight: 400; }
+/* 管理员徽标（对齐 eatWhat mine 页） */
+.admin-badge {
+  display: inline-block; margin-top: 6rpx; padding: 2rpx 14rpx;
+  font-size: 20rpx; color: #b45309; background: #fef3c7; border-radius: 8rpx;
+}
 .profile-sub { display: block; margin-top: 8rpx; font-size: 22rpx; color: #94a3b8; }
 
 /* 头像 emoji 候选网格（4 列，点选即保存，参考 eatWhat） */
@@ -448,24 +472,25 @@ async function doDelete() {
 }
 .emoji-cell.on { background: #1e3a8a; border-color: #1e3a8a; }
 
-/* 菜单卡 */
+/* 菜单卡（参考 eatWhat：emoji 图标 + 双行标题，字号加大） */
 .card {
   background: #fff; border-radius: 24rpx;
   box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.06);
 }
 .menu-card { margin-top: 24rpx; padding: 0 28rpx; }
 .menu-row {
-  display: flex; align-items: center; padding: 30rpx 0;
+  display: flex; align-items: center; padding: 28rpx 0;
   border-bottom: 1rpx solid #f1f5f9;
   gap: 20rpx;
-  color: #475569;
 }
 .menu-row.no-border { border-bottom: none; }
 .menu-row:active { background: #f8fafc; }
-.m-label { flex: 1; font-size: 28rpx; color: #1e293b; }
-.m-arrow { color: #cbd5e1; flex-shrink: 0; }
-.m-sub-text { font-size: 22rpx; color: #94a3b8; max-width: 200rpx; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.m-status { font-size: 24rpx; }
+.m-ic { font-size: 36rpx; flex-shrink: 0; width: 48rpx; text-align: center; }
+.m-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4rpx; }
+.m-label { font-size: 30rpx; font-weight: 600; color: #1e293b; }
+.m-arrow { color: #cbd5e1; font-size: 36rpx; flex-shrink: 0; line-height: 1; }
+.m-sub-text { font-size: 22rpx; color: #94a3b8; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.m-status { font-size: 24rpx; flex-shrink: 0; }
 .m-status.on { color: #059669; }
 .m-status.off { color: #94a3b8; }
 
@@ -535,7 +560,8 @@ async function doDelete() {
   color: #dc2626;
 }
 .logout-card:active { background: #f8fafc; }
-.logout-text { font-size: 28rpx; color: #dc2626; font-weight: 500; }
+.logout-ic { font-size: 30rpx; }
+.logout-text { font-size: 30rpx; color: #dc2626; font-weight: 500; }
 
 /* 注销账户危险区（参考 eatWhat danger-zone） */
 .danger-card {

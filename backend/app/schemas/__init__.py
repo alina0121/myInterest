@@ -14,18 +14,6 @@ Direction = Literal["buy", "sell", "bonus_share"]
 
 
 # ---------- auth ----------
-class RegisterIn(BaseModel):
-    username: str = Field(min_length=4, max_length=32)
-    email: Optional[str] = None
-    password: str = Field(min_length=8)
-    nickname: Optional[str] = None
-
-
-class LoginIn(BaseModel):
-    account: str
-    password: str
-
-
 class RefreshIn(BaseModel):
     refresh_token: str
 
@@ -38,37 +26,22 @@ class WxLoginIn(BaseModel):
 
 # ---------- auth：邮箱验证码相关 ----------
 class SendCodeIn(BaseModel):
-    """发送验证码：channel=email/sms，target=邮箱/手机号，purpose=login/register/reset/bind"""
+    """发送验证码：channel=email/sms，target=邮箱/手机号，purpose=login（登录/注册合一）/bind（绑定邮箱）"""
     channel: Literal["email", "sms"]
     target: str = Field(min_length=4, max_length=64)
-    purpose: Literal["login", "register", "reset", "bind"]
+    purpose: Literal["login", "bind"]
 
 
 class EmailLoginIn(BaseModel):
-    """邮箱验证码登录：邮箱 + 验证码"""
+    """邮箱验证码登录：邮箱 + 验证码（未注册自动建号）"""
     email: str = Field(min_length=4)
     code: str = Field(min_length=4, max_length=8)
-
-
-class EmailRegisterIn(BaseModel):
-    """邮箱验证码注册：邮箱 + 验证码 + 可选昵称/密码"""
-    email: str = Field(min_length=4)
-    code: str = Field(min_length=4, max_length=8)
-    nickname: Optional[str] = Field(default=None, max_length=32)
-    password: Optional[str] = Field(default=None, min_length=8)
 
 
 class ProfileIn(BaseModel):
     """修改个人资料：昵称 / 头像（emoji），至少传一项"""
     nickname: Optional[str] = Field(default=None, max_length=32)
     avatar: Optional[str] = Field(default=None, max_length=32)
-
-
-class ResetPasswordIn(BaseModel):
-    """找回密码：邮箱 + 验证码 + 新密码"""
-    email: str = Field(min_length=4)
-    code: str = Field(min_length=4, max_length=8)
-    new_password: str = Field(min_length=8)
 
 
 class BindEmailIn(BaseModel):

@@ -1,19 +1,12 @@
 import { get, post, put, httpPatch, del } from './http'
 
 // ---------- 认证 ----------
-// 登录页调用时本地无 token，HTTP 拦截器自动跳过 Authorization 头
-export const apiLogin = (account, password) => post('/api/auth/login', { account, password })
-export const apiRegister = (payload) => post('/api/auth/register', payload)
-// 邮箱验证码：send-code/email-login/email-register/reset-password 为游客态调用；
-// bind-email 需登录态（自动带 token）
+// 密码登录体系已下线：仅保留邮箱验证码（登录/注册合一）与绑定邮箱
+// send-code/email-login 为游客态调用；bind-email 需登录态（自动带 token）
 export const apiSendCode = (channel, target, purpose) =>
   post('/api/auth/send-code', { channel, target, purpose })
 export const apiEmailLogin = (email, code) =>
   post('/api/auth/email-login', { email, code })
-export const apiEmailRegister = (payload) =>
-  post('/api/auth/email-register', payload)
-export const apiResetPassword = (email, code, newPassword) =>
-  post('/api/auth/reset-password', { email, code, new_password: newPassword })
 export const apiBindEmail = (email, code) =>
   post('/api/auth/bind-email', { email, code })
 export const apiMe = () => get('/api/auth/me')
@@ -78,7 +71,6 @@ export const apiAdminUsers = (params) => get('/api/admin/users', params)
 export const apiAdminUserData = (id) => get(`/api/admin/users/${id}/data`)
 export const apiAdminBanUser = (id) => post(`/api/admin/users/${id}/ban`)
 export const apiAdminUnbanUser = (id) => post(`/api/admin/users/${id}/unban`)
-export const apiAdminResetPwd = (id) => post(`/api/admin/users/${id}/reset-password`)
 export const apiAdminSchedules = (params) => get('/api/admin/schedules', params)
 export const apiAdminCreateSchedule = (payload) => post('/api/admin/schedules', payload)
 export const apiAdminApproveSchedule = (id) => post(`/api/admin/schedules/${id}/approve`)
@@ -107,3 +99,4 @@ export const apiAdminLogs = (params) => get('/api/admin/logs', params)
 export const apiAdminConfig = () => get('/api/admin/config')
 export const apiAdminUpdateConfig = (items) => put('/api/admin/config', { items })
 export const apiAdminResetConfig = (key) => del(`/api/admin/config/${key}`)
+export const apiAdminTestMail = (to) => post('/api/admin/test-mail', { to })

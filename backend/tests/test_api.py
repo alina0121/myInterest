@@ -12,10 +12,17 @@ def test_register_login_me(client):
     # 未登录
     r = client.get("/api/auth/me")
     assert r.status_code == 401 and r.json()["code"] == 1002
-    # 登录（含错误密码）
-    bad = client.post("/api/auth/login", json={"account": "alice", "password": "wrong-pass"})
-    assert bad.json()["code"] == 2001
-    good = client.post("/api/auth/login", json={"account": "alice", "password": "password123"})
+    # 密码登录接口已下线
+    assert client.post("/api/auth/login",
+                       json={"account": "alice", "password": "x"}).status_code == 404
+    # 邮箱验证码登录：错码被拒，正确码发双 token
+    from app.services import verify_code_service
+    bad = client.post("/api/auth/email-login",
+                      json={"email": "alice@test.com", "code": "000000"})
+    assert bad.json()["code"] == 1001
+    code = verify_code_service.generate_and_store("email", "alice@test.com", "login")
+    good = client.post("/api/auth/email-login",
+                       json={"email": "alice@test.com", "code": code})
     assert good.json()["code"] == 0 and "refresh_token" in good.json()["data"]
 
 

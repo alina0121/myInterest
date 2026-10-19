@@ -15,8 +15,8 @@ from conftest import auth, register
 
 
 def _make_role(client, username, role):
-    """注册用户并直接在库里改角色，重新登录取 token（role 不进 JWT，走库校验）。"""
-    register(client, username)
+    """DB 直建用户并改角色，直接返回 token（role 不进 JWT，请求时走库校验）。"""
+    token = register(client, username)
     from app.database import engine
     from app.models import User
     with Session(engine) as s:
@@ -24,9 +24,7 @@ def _make_role(client, username, role):
         u.role = role
         s.add(u)
         s.commit()
-    r = client.post("/api/auth/login", json={"account": username, "password": "password123"})
-    assert r.json()["code"] == 0
-    return r.json()["data"]["access_token"]
+    return token
 
 
 @pytest.fixture(autouse=True)

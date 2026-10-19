@@ -10,17 +10,16 @@ from collections import defaultdict, deque
 
 import httpx
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from sqlmodel import Session, or_, select
+from sqlmodel import Session, select
 
 from ..database import get_session
 from ..models import Feedback, Holding, Lot, User, UserSetting
-from ..schemas import (BindEmailIn, EmailLoginIn, EmailRegisterIn, LoginIn,
-                       ProfileIn, RefreshIn, RegisterIn, ResetPasswordIn,
+from ..schemas import (BindEmailIn, EmailLoginIn, ProfileIn, RefreshIn,
                        SendCodeIn, WxLoginIn)
 from ..services import config_service, mail_service, sms_service, verify_code_service
 from ..utils.errors import AppError, Codes, ok
 from ..utils.security import (create_refresh_token, decode_token, hash_password,
-                              token_pair, verify_password)
+                              token_pair)
 from ..utils.timeutil import now_str
 from .deps import get_current_user
 
@@ -50,45 +49,6 @@ def _user_out(u: User) -> dict:
             "nickname": u.nickname, "avatar": u.avatar, "role": u.role,
             "base_currency": u.base_currency, "has_wx": bool(u.wx_openid),
             "created_at": u.created_at}
-
-
-@router.post("/register")
-def register(body: RegisterIn, request: Request,
-             session: Session = Depends(get_session)):
-    _rate_limit(request)
-    exists = session.exec(select(User).where(User.username == body.username)).first()
-    if exists:
-        raise AppError(Codes.USER_EXISTS, "用户名已存在", status=409)
-    if body.email:
-        email_exists = session.exec(select(User).where(User.email == body.email)).first()
-        if email_exists:
-            raise AppError(Codes.USER_EXISTS, "邮箱已被使用", status=409)
-    user = User(username=body.username, email=body.email,
-                password_hash=hash_password(body.password),
-                nickname=body.nickname or body.username)
-    session.add(user)
-    session.flush()  # 先 flush 拿到 user.id，才能建 1:1 的设置行
-    session.add(UserSetting(user_id=user.id))  # 每个新用户配一份默认设置（提醒/自动匹配开关）
-    session.commit()
-    session.refresh(user)
-    return ok({"user": _user_out(user), **token_pair(user.id)})  # 注册即登录，直接发双 token
-
-
-@router.post("/login")
-def login(body: LoginIn, request: Request, session: Session = Depends(get_session)):
-    _rate_limit(request)
-    # account 字段用户名/邮箱都能登录，所以用 or_ 两个条件一起查
-    user = session.exec(select(User).where(
-        or_(User.username == body.account, User.email == body.account))).first()
-    if user is None or not verify_password(body.password, user.password_hash):
-        # 用户不存在和密码错误返回同一句话，防止被枚举出哪些用户名已注册
-        raise AppError(Codes.BAD_CREDENTIALS, "用户名或密码错误", status=401)
-    if user.status == "banned":
-        raise AppError(Codes.FORBIDDEN, "账号已封禁，请联系管理员", status=403)
-    user.last_login_at = now_str()
-    session.add(user)
-    session.commit()
-    return ok({"user": _user_out(user), **token_pair(user.id)})
 
 
 @router.post("/refresh")
@@ -197,7 +157,7 @@ def send_code(body: SendCodeIn, request: Request,
               session: Session = Depends(get_session)):
     """发送验证码：邮箱或短信。通过 BackgroundTasks 异步发，失败仅记日志不阻塞响应。
 
-    channel=email 时需要先在后台开启 mail_enabled 和配置 SMTP；
+    channel=email 时：SMTP 配置完整则真实发信，否则验证码降级打印到日志（均可用）；
     channel=sms 时需要开启 sms_enabled（V2 短信 SDK 接入前抛 501）。
     """
     _rate_limit(request)
@@ -205,9 +165,8 @@ def send_code(body: SendCodeIn, request: Request,
     if body.channel == "email":
         if "@" not in body.target or "." not in body.target.split("@")[-1]:
             raise AppError(Codes.VALIDATION, "邮箱格式不正确", status=422)
-        if not config_service.get_bool("mail_enabled"):
-            raise AppError(Codes.VALIDATION, "邮件服务未开启，请联系管理员",
-                           status=503)
+        # mail_enabled 不再拦截：未开启/SMTP 未配置时由 mail_service 降级把
+        # 验证码打印到日志（开发期可直接从日志取码登录；生产配好 SMTP 后走真实发信）
     else:  # sms
         if not body.target.isdigit() or len(body.target) < 6:
             raise AppError(Codes.VALIDATION, "手机号格式不正确", status=422)
@@ -215,15 +174,8 @@ def send_code(body: SendCodeIn, request: Request,
             raise AppError(Codes.VALIDATION, "短信服务未开启，请联系管理员",
                            status=503)
 
-    # 业务前置检查：register 时若邮箱已注册则不发码（避免发骚扰信）
-    if body.purpose == "register":
-        if session.exec(select(User).where(User.email == body.target)).first():
-            raise AppError(Codes.USER_EXISTS, "该邮箱已注册", status=409)
-    elif body.purpose == "reset":
-        if not session.exec(select(User).where(User.email == body.target)).first():
-            # 出于隐私不暴露存在性，但也不发码（避免被探测）
-            raise AppError(Codes.NOT_FOUND, "该邮箱未注册", status=404)
     # login 不做存在性检查：未注册邮箱也发码，配合 /email-login 自动建号（登录/注册合一）
+    # bind 供已登录用户绑定邮箱使用；register/reset 已随密码登录体系下线
 
     # 生成并存表（含频率限制：同目标 code_send_interval_sec 秒内不可重发）
     code = verify_code_service.generate_and_store(body.channel, body.target, body.purpose)
@@ -271,54 +223,6 @@ def email_login(body: EmailLoginIn, request: Request,
     session.refresh(user)
     return ok({"user": _user_out(user), "is_new_user": is_new,
                **token_pair(user.id)})
-
-
-@router.post("/email-register")
-def email_register(body: EmailRegisterIn, request: Request,
-                   session: Session = Depends(get_session)):
-    """邮箱验证码注册（PC 网页端主要入口）：校验 → 建 User（username=email）。
-
-    password 可选：传则后续可用密码登录；不传则只能通过邮箱验证码登录。
-    """
-    _rate_limit(request)
-    verify_code_service.verify("email", body.email, body.code, "register")
-    # 邮箱已注册则报错
-    if session.exec(select(User).where(User.email == body.email)).first():
-        raise AppError(Codes.USER_EXISTS, "该邮箱已注册", status=409)
-    # 用户名默认用邮箱前缀（@ 前部分），冲突则加随机后缀
-    base = body.email.split("@")[0]
-    username = base
-    while session.exec(select(User).where(User.username == username)).first():
-        username = base + "_" + secrets.token_hex(2)
-    # 密码：传了用，没传则随机（用户后续只能邮箱验证码登录）
-    password_hash = hash_password(body.password) if body.password else \
-        hash_password(secrets.token_urlsafe(16))
-    user = User(
-        username=username, email=body.email,
-        password_hash=password_hash,
-        nickname=body.nickname or base,
-    )
-    session.add(user)
-    session.flush()
-    session.add(UserSetting(user_id=user.id))
-    session.commit()
-    session.refresh(user)
-    return ok({"user": _user_out(user), **token_pair(user.id)})
-
-
-@router.post("/reset-password")
-def reset_password(body: ResetPasswordIn, request: Request,
-                   session: Session = Depends(get_session)):
-    """找回密码：邮箱 + 验证码 + 新密码 → 改 password_hash。"""
-    _rate_limit(request)
-    verify_code_service.verify("email", body.email, body.code, "reset")
-    user = session.exec(select(User).where(User.email == body.email)).first()
-    if user is None:
-        raise AppError(Codes.NOT_FOUND, "该邮箱未注册", status=404)
-    user.password_hash = hash_password(body.new_password)
-    session.add(user)
-    session.commit()
-    return ok({"reset": True})
 
 
 @router.post("/bind-email")

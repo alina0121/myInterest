@@ -2,17 +2,15 @@
 
 设计要点：
 - 配置全部从 SPECS 读取（mail_enabled/smtp_host/smtp_port/...）
-- mail_enabled=False 时直接抛错，前端提示"邮件服务未开启"
+- mail_enabled=False 或 SMTP 未配置完整时不报错，验证码降级打印到日志（开发期可直接取码登录）
 - 通过 FastAPI BackgroundTasks 调用，失败仅 log.warning 不阻塞响应
-- 邮件正文按 purpose 区分（login/register/reset/bind）
+- 邮件正文按 purpose 区分（login/bind）
 """
 import logging
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from typing import Optional
 
-from ..utils.errors import AppError, Codes
 from . import config_service
 
 log = logging.getLogger("xi.mail")
@@ -20,20 +18,20 @@ log = logging.getLogger("xi.mail")
 # 邮件主题与正文模板（按 purpose 区分）
 _TEMPLATES = {
     "login": ("登录验证码", "您正在登录攒息，验证码：{code}，10 分钟内有效。"),
-    "register": ("注册验证码", "您正在注册攒息账号，验证码：{code}，10 分钟内有效。"),
-    "reset": ("重置密码验证码", "您正在重置密码，验证码：{code}，10 分钟内有效。如非本人操作请忽略。"),
     "bind": ("绑定邮箱验证码", "您正在绑定邮箱，验证码：{code}，10 分钟内有效。"),
 }
 
 
 def send_code(target: str, code: str, purpose: str) -> None:
-    """发送验证码邮件。mail_enabled=False 时抛错。
+    """发送验证码邮件。mail_enabled=False / SMTP 未配置时降级打印日志。
 
     本函数同步执行（由 BackgroundTasks 包装异步调用），失败仅记日志。
     """
     if not config_service.get_bool("mail_enabled"):
-        raise AppError(Codes.VALIDATION, "邮件服务未开启，请联系管理员",
-                       status=503)
+        # 未开启邮件服务时不阻塞登录流程：验证码降级打印到日志（与 SMTP 未配置同款兜底）
+        log.warning("[mail] 邮件服务未开启，验证码仅打印日志。to=%s purpose=%s code=%s",
+                    target, purpose, code)
+        return
     host = config_service.get_text("smtp_host").strip()
     port = config_service.get_int("smtp_port")
     user = config_service.get_text("smtp_user").strip()

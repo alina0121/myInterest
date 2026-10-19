@@ -2,9 +2,7 @@
 import { get, post, patch, del, put } from '@/utils/request'
 
 // ---------- 认证 ----------
-export const apiLogin = (account, password) =>
-  post('/api/auth/login', { account, password }, { auth: false })
-export const apiRegister = (payload) => post('/api/auth/register', payload, { auth: false })
+// 密码登录体系已下线：邮箱验证码（登录/注册合一）+ 微信登录（仅小程序）
 export const apiWxLogin = (code, nickname, avatar) =>
   post('/api/auth/wx-login', { code, nickname, avatar }, { auth: false })
 export const apiMe = () => get('/api/auth/me')
@@ -14,10 +12,6 @@ export const apiSendCode = (channel, target, purpose) =>
   post('/api/auth/send-code', { channel, target, purpose }, { auth: false })
 export const apiEmailLogin = (email, code) =>
   post('/api/auth/email-login', { email, code }, { auth: false })
-export const apiEmailRegister = (payload) =>
-  post('/api/auth/email-register', payload, { auth: false })
-export const apiResetPassword = (email, code, newPassword) =>
-  post('/api/auth/reset-password', { email, code, new_password: newPassword }, { auth: false })
 export const apiBindEmail = (email, code) =>
   post('/api/auth/bind-email', { email, code })
 // 个人资料 / 解绑邮箱 / 注销账户（对齐 eatWhat 账户设置）

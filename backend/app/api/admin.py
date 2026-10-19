@@ -9,8 +9,6 @@ v0.3 变更：
 - 去掉 Dividend 落表引用，admin 概览/用户数据里的分红统计改调 dividend_service.list_user_dividends
 """
 import json
-import secrets
-import string
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Query, Request
 from sqlmodel import Session, func, select
@@ -25,7 +23,6 @@ from ..schemas import (AnnouncementCreate, AnnouncementUpdate, ConfigUpdateIn,
 from ..services import (config_service, crawler_service, dividend_service, fx_service,
                         lots_service, schedule_service, security_service)
 from ..utils.errors import AppError, Codes, not_found, ok
-from ..utils.security import hash_password
 from ..utils.timeutil import add_days, days_ago_iso, now_str, today_str
 from .deps import get_admin_user, require_super_admin
 from .holdings import holding_out
@@ -59,11 +56,6 @@ def _can_operate(operator: User, target: User) -> bool:
     if target.role == "user":
         return True
     return operator.role == "super_admin" and target.role == "admin"
-
-
-def _gen_temp_password(length: int = 10) -> str:
-    alphabet = string.ascii_letters + string.digits
-    return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
 # ---------- 11.1 看板 ----------
@@ -226,23 +218,6 @@ def unban_user(user_id: int, request: Request,
          {"username": target.username})
     session.commit()
     return ok({"id": target.id, "status": "active"})
-
-
-@router.post("/users/{user_id}/reset-password")
-def reset_password(user_id: int, request: Request,
-                   session: Session = Depends(get_session),
-                   admin: User = Depends(get_admin_user)):
-    target = session.get(User, user_id)
-    if target is None:
-        raise not_found()
-    if not _can_operate(admin, target):
-        raise AppError(Codes.FORBIDDEN, "不可操作管理员账号", status=403)
-    temp = _gen_temp_password()
-    target.password_hash = hash_password(temp)  # 临时密码不落日志
-    _log(session, admin, request, "user.reset_password", "user", target.id,
-         {"username": target.username})
-    session.commit()
-    return ok({"temp_password": temp})
 
 
 # ---------- 11.3 预案审核 ----------

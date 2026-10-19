@@ -1,7 +1,7 @@
 """演示数据种子脚本（可重复运行）——v0.3 纯预案模式。
 
 造数据流程：
-1. 创建/复用 demo 用户（用户名 demo，密码 demo123456）
+1. 创建/复用 demo 用户（用户名 demo，密码登录已下线，登录走邮箱验证码 demo@xi.com）
 2. 10 只股票多市场持仓 + 多批次买入（A 股 5 + 美股 3 + 港股 1 + 基金 1）
 3. 直接写 dividend_schedules（status=published），无需手动造 Dividend 记录
    —— v0.3 分红实时计算接口会自动从预案 + 持仓批次派生。
@@ -15,6 +15,7 @@
 """
 import argparse
 import os
+import secrets
 import sys
 from pathlib import Path
 
@@ -30,7 +31,7 @@ from app.services.security_service import upsert_security
 from app.utils.security import hash_password
 
 DEMO_USERNAME = "demo"
-DEMO_PASSWORD = "demo123456"
+# 密码登录体系已下线：password_hash 仅存随机占位值（与 wx-login 建号一致）
 
 PORTFOLIO = [
     {
@@ -176,12 +177,26 @@ PENDING_SCHEDULES = [
 ]
 
 
+# 已发布且「即将到账」的预案（相对 2026 年 10-11 月），让 upcoming/月度统计有内容；
+# 另含 2 条 2026 年内已派发的，补当年已收分红
+UPCOMING_PUBLISHED = [
+    # (market, code, ex_date, record_date, pay_date, dps, note)
+    ("a_share", "600036", "2026-10-23", "2026-10-22", "2026-10-28", 1.20, "2026 三季度分红"),
+    ("a_share", "601088", "2026-11-06", "2026-11-05", "2026-11-13", 2.26, "2026 中期分红"),
+    ("hk_stock", "00700", "2026-11-13", "2026-11-12", "2026-11-20", 4.50, "2026 三季度分红"),
+    ("us_stock", "KO", "2026-12-04", "2026-12-04", "2026-12-15", 0.51, "2026 Q4 分红"),
+    ("a_share", "600900", "2026-07-16", "2026-07-15", "2026-07-20", 0.85, "2025 年度分红"),
+    ("a_share", "601398", "2026-05-12", "2026-05-11", "2026-05-15", 0.30, "2025 年度分红"),
+]
+
+
 def get_or_create_demo_user(session: Session) -> User:
     u = session.exec(select(User).where(User.username == DEMO_USERNAME)).first()
     if u:
         return u
     u = User(username=DEMO_USERNAME, email="demo@xi.com",
-             password_hash=hash_password(DEMO_PASSWORD), nickname="演示账户", role="user")
+             password_hash=hash_password(secrets.token_urlsafe(16)),
+             nickname="演示账户", role="user")
     session.add(u)
     session.commit()
     session.refresh(u)
@@ -260,6 +275,30 @@ def create_published_schedules(session: Session, spec: dict) -> int:
     return n
 
 
+def create_upcoming_published(session: Session) -> int:
+    """写入即将到账/当年已派的已发布预案（currency 按持仓本币）。"""
+    n = 0
+    for market, code, ex_date, rec_date, pay_date, dps, note in UPCOMING_PUBLISHED:
+        exists = session.exec(select(DividendSchedule).where(
+            DividendSchedule.market == market,
+            DividendSchedule.code == code,
+            DividendSchedule.ex_date == ex_date,
+        )).first()
+        if exists:
+            continue
+        spec = next(s for s in PORTFOLIO if s["market"] == market and s["code"] == code)
+        session.add(DividendSchedule(
+            market=market, code=code, name=spec["name"],
+            ex_date=ex_date, record_date=rec_date, pay_date=pay_date,
+            dps=dps, currency=spec["currency"], div_type="cash",
+            source="manual", confidence=1.0, status="published",
+            raw_title=f"demo seed: {spec['name']} {note}",
+        ))
+        n += 1
+    session.commit()
+    return n
+
+
 def create_pending_schedules(session: Session) -> int:
     n = 0
     for (market, code, name, ex_date, rec_date, pay_date, dps,
@@ -311,6 +350,10 @@ def main() -> None:
                   f"  批次 {len(spec['lots'])} · 预案 {ns}")
         print(f"合计：持仓 {total_h} · 批次 {total_l} · 已发布预案 {total_s}")
 
+        print("\n>>> 写入即将到账/当年已派的已发布预案...")
+        nu = create_upcoming_published(session)
+        print(f"  ✓ 新增 {nu} 条（未来到账 + 当年已派）")
+
         print("\n>>> 写入待确认预案（pending schedules）...")
         np = create_pending_schedules(session)
         print(f"  ✓ 新增 {np} 条 pending 预案")
@@ -322,7 +365,8 @@ def main() -> None:
             r = run_crawl(session)
             print(f"  fetched={r.get('fetched')} new_pending={r.get('new_pending')}")
 
-    print("\n✅ 完成。可用 demo / demo123456 登录，分红数据由预案 + 持仓实时派生。")
+    print("\n✅ 完成。用邮箱验证码登录（demo@xi.com，未配 SMTP 时验证码见后端日志），"
+          "分红数据由预案 + 持仓实时派生。")
 
 
 if __name__ == "__main__":

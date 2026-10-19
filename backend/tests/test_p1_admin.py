@@ -1,7 +1,7 @@
 """P1 测试：分红预案 + 运营后台（docs/04 §五/十一、docs/06）。
 
 覆盖：预案审核流、auto-match 幂等、upcoming 预估、公告/反馈、
-后台用户管理（封禁/重置密码）、汇率税率、操作日志、权限隔离。
+后台用户管理（封禁/解封）、汇率税率、操作日志、权限隔离。
 """
 import pytest
 
@@ -12,7 +12,7 @@ USER = {"username": "normal_user", "password": "password123"}
 
 
 def _make_admin(client, username="admin01"):
-    """直接注册一个用户并提升为 super_admin（测试库无外预置）。"""
+    """DB 直建用户并提升为 super_admin，直接返回 token（role 不进 JWT，走库校验）。"""
     token = register(client, username)
     from app.database import engine
     from app.models import User
@@ -22,10 +22,7 @@ def _make_admin(client, username="admin01"):
         u.role = "super_admin"
         s.add(u)
         s.commit()
-    # 重新登录拿新 token（role 不进 token，token 仍有效）
-    r = client.post("/api/auth/login", json={"account": username, "password": "password123"})
-    assert r.json()["code"] == 0
-    return r.json()["data"]["access_token"]
+    return token
 
 
 def _create_holding_with_lot(client, token, **kw):
@@ -228,23 +225,18 @@ def test_admin_user_management(client):
     r = client.get(f"/api/admin/users/{uid}/data", headers=auth(admin_token)).json()
     assert r["code"] == 0 and r["data"]["user"]["id"] == uid
 
-    # 重置密码
-    r = client.post(f"/api/admin/users/{uid}/reset-password",
-                    headers=auth(admin_token)).json()
-    assert "temp_password" in r["data"]
-    temp = r["data"]["temp_password"]
-    login = client.post("/api/auth/login", json={"account": "target_user", "password": temp})
-    assert login.json()["code"] == 0
-
-    # 封禁 → 登录被拒
+    # 封禁 → 邮箱验证码登录被拒（走真实 email-login 流程）
+    from app.services import verify_code_service
     client.post(f"/api/admin/users/{uid}/ban", headers=auth(admin_token))
-    banned_login = client.post("/api/auth/login",
-                               json={"account": "target_user", "password": temp})
+    code = verify_code_service.generate_and_store("email", "target_user@test.com", "login")
+    banned_login = client.post("/api/auth/email-login",
+                               json={"email": "target_user@test.com", "code": code})
     assert banned_login.json()["code"] == 1004
     # 解封
     client.post(f"/api/admin/users/{uid}/unban", headers=auth(admin_token))
-    ok_login = client.post("/api/auth/login",
-                           json={"account": "target_user", "password": temp})
+    code = verify_code_service.generate_and_store("email", "target_user@test.com", "login")
+    ok_login = client.post("/api/auth/email-login",
+                           json={"email": "target_user@test.com", "code": code})
     assert ok_login.json()["code"] == 0
 
 

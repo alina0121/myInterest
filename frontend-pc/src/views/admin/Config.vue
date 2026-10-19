@@ -196,9 +196,9 @@ async function loadConfig() {
   } finally { configLoading.value = false }
 }
 
-// 用后端返回的 groups 回填表单
+// 用后端返回的 groups 回填表单（「登录方式」组由专门的登录方式页维护，本页排除避免重复）
 function applyGroups(groups) {
-  configGroups.value = groups || []
+  configGroups.value = (groups || []).filter((g) => g.category !== '登录方式')
   sensitiveKeys.clear()
   for (const g of configGroups.value) {
       for (const item of g.items) {
@@ -233,7 +233,11 @@ async function saveConfig() {
         const joined = arr.join(',')
         if (joined !== item.value) items[item.key] = joined
       } else if (v === null || v === undefined || v === '') {
-        return ElMessage.warning(`「${item.label}」不能留空`)
+        // 字符串允许留空（如 smtp_sender/白名单外的可选项），布尔/整数不允许
+        if (item.type === 'bool' || item.type === 'int' || item.type === 'float') {
+          return ElMessage.warning(`「${item.label}」不能留空`)
+        }
+        if (item.value !== '') items[item.key] = ''
       } else if (JSON.stringify(v) !== JSON.stringify(item.value)) {
         items[item.key] = v
       }

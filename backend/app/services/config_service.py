@@ -105,7 +105,7 @@ SPECS: dict[str, dict] = {
     # ── 登录方式：邮件 / 短信 / 验证码参数 ─────────────────────────
     "mail_enabled": {
         "category": "登录方式", "type": _BOOL, "default": False,
-        "label": "启用邮件验证码", "help": "开启后才能用邮箱验证码登录/注册/找回密码；需先配置 SMTP 服务器。"},
+        "label": "启用邮件验证码", "help": "开启后验证码邮件走 SMTP 真实发信；未开启或未配置 SMTP 时验证码自动打印到后端日志（开发期可直接取码登录）。"},
     "smtp_host": {
         "category": "登录方式", "type": _STR, "default": "",
         "label": "SMTP 服务器", "help": "如 smtp.qq.com / smtp.163.com / smtp.gmail.com。"},
@@ -144,7 +144,7 @@ SPECS: dict[str, dict] = {
         "label": "登录短信模板ID", "help": "短信服务商提供的模板编号；V2 接入时用。"},
     "sms_template_reset": {
         "category": "登录方式", "type": _STR, "default": "",
-        "label": "重置密码短信模板ID", "help": "短信服务商提供的模板编号；V2 接入时用。"},
+        "label": "绑定邮箱短信模板ID", "help": "短信服务商提供的模板编号（对应 bind 场景）；V2 接入时用。"},
     "code_ttl_minutes": {
         "category": "登录方式", "type": _INT, "default": 10, "min": 1, "max": 60,
         "label": "验证码有效期(分钟)", "help": "邮箱/短信验证码的有效时长；超时未使用即作废。"},

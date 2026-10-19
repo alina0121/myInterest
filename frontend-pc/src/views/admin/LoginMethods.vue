@@ -23,6 +23,11 @@
           <div v-else class="ov-row text-muted">未配置 SMTP 服务器</div>
           <div v-if="loginState.smtp_user" class="ov-row">发件账号：{{ loginState.smtp_user }}</div>
           <div v-else class="ov-row text-muted">未配置发件账号</div>
+          <div v-if="canWrite" class="ov-row test-mail-row">
+            <el-input v-model="testMailTo" size="small" placeholder="测试收件邮箱" style="flex:1" />
+            <el-button size="small" :loading="testMailLoading" @click="sendTestMail">发送测试</el-button>
+          </div>
+          <div v-else class="ov-row text-muted">未配置 SMTP 时验证码自动打印到后端日志（开发期可直接取码登录）</div>
         </div>
       </div>
 
@@ -101,7 +106,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiAdminConfig, apiAdminUpdateConfig, apiAdminResetConfig } from '../../api'
+import { apiAdminConfig, apiAdminUpdateConfig, apiAdminResetConfig, apiAdminTestMail } from '../../api'
 import { useUserStore } from '../../store/user'
 
 const userStore = useUserStore()
@@ -138,7 +143,8 @@ async function loadConfig() {
 }
 
 function applyGroups(groups) {
-  configGroups.value = groups
+  // 本页只维护「登录方式」组，其余分组由「汇率与税率」页负责
+  configGroups.value = (groups || []).filter((g) => g.category === '登录方式')
   sensitiveKeys.clear()
   for (const g of configGroups.value) {
     for (const item of g.items) {
@@ -161,19 +167,22 @@ function applyOverview() {
   loginState.smtp_use_ssl = formModel.smtp_use_ssl
   loginState.sms = !!formModel.sms_enabled
   loginState.sms_provider = formModel.sms_provider || 'aliyun'
-  // wx_appid 是敏感项前端拿不到原文，只能从 has_value 判断
-  const wxItem = findItem('wx_appid')
-  loginState.wx_appid = wxItem?.has_value ? wxItem.mask || '(已配置)' : ''
+  // wx_appid 非敏感项，后端回传原文，直接读表单值
+  loginState.wx_appid = formModel.wx_appid || ''
   loginState.wx = !!loginState.wx_appid
 }
 
-function findItem(key) {
-  for (const g of configGroups.value) {
-    for (const item of g.items) {
-      if (item.key === key) return item
-    }
-  }
-  return null
+// 测试发信：用当前 SMTP 配置发一封测试邮件（仅 super_admin）
+const testMailTo = ref('')
+const testMailLoading = ref(false)
+async function sendTestMail() {
+  if (!testMailTo.value) return ElMessage.warning('请填写测试收件邮箱')
+  testMailLoading.value = true
+  try {
+    const r = await apiAdminTestMail(testMailTo.value)
+    r.success ? ElMessage.success(`发送成功，请查收 ${testMailTo.value}`)
+              : ElMessage.error(r.message || '发送失败')
+  } catch (e) { /* toast 已统一 */ } finally { testMailLoading.value = false }
 }
 
 async function saveConfig() {
@@ -230,6 +239,7 @@ onMounted(loadConfig)
 .ov-head h3 { margin: 0; font-size: 14px; font-weight: 600; }
 .ov-body { font-size: 13px; }
 .ov-row { padding: 4px 0; color: #334155; }
+.test-mail-row { display: flex; gap: 8px; align-items: center; }
 .card h3 { font-size: 15px; font-weight: 600; margin: 0 0 16px; }
 .card-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
 .card-head h3 { margin: 0; }
