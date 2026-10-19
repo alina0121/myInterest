@@ -1,7 +1,19 @@
 <template>
   <view class="page">
-    <!-- #ifdef H5 --><WebLayout title="持仓管理" subtitle="点击行查看买入批次与分红归属" /><!-- #endif -->
+    <!-- #ifdef H5 --><WebLayout title="持仓 · 记分红" subtitle="持仓批次与即将到账分红预告" /><!-- #endif -->
 
+    <!-- 顶部功能切换 -->
+    <view class="segment">
+      <view :class="['seg-item', tab === 'holdings' ? 'on' : '']" @click="tab = 'holdings'">
+        <text class="seg-emoji">💼</text><text class="seg-text">持仓</text>
+      </view>
+      <view :class="['seg-item', tab === 'record' ? 'on' : '']" @click="tab = 'record'">
+        <text class="seg-emoji">✍️</text><text class="seg-text">记分红</text>
+      </view>
+    </view>
+
+    <!-- ===== 持仓 ===== -->
+    <block v-if="tab === 'holdings'">
     <!-- 加载中 -->
     <view v-if="loading && !list.length" class="loading-wrap">
       <text class="loading-text">加载中...</text>
@@ -70,21 +82,43 @@
     <view class="add-btn-wrap">
       <button class="add-btn" @click="goAdd">+ 添加持仓</button>
     </view>
+    </block>
+
+    <!-- ===== 记分红 ===== -->
+    <block v-else>
+      <view class="section-title">待确认预告</view>
+      <view class="card upcoming-card">
+        <view v-if="!upcoming.length" class="upcoming-empty">暂无待确认的分红预告</view>
+        <view v-for="(u, i) in upcoming" :key="u.id || i" class="u-row">
+          <view class="u-left">{{ u.name }} · 约{{ cSym(u.currency) }}{{ fmtMoney(u.est_net) }}</view>
+          <view class="u-right text-amber">{{ fmtDate(u.pay_date) }} 到账</view>
+        </view>
+      </view>
+    </block>
 
     <view style="height: 140rpx"></view>
+    <!-- #ifdef H5 --><CustomTab current="/pages/holdings/holdings" /><!-- #endif -->
   </view>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
-import { apiHoldings } from '@/api'
-import { marketMap, badgeClass, fmt, moneyWith } from '@/utils/constants'
+import { onShow, onLoad, onPullDownRefresh } from '@dcloudio/uni-app'
+import { apiHoldings, apiUpcoming } from '@/api'
+import { marketMap, badgeClass, fmt, moneyWith, currencyMap } from '@/utils/constants'
 import { userStore } from '@/store/user'
 import WebLayout from '@/components/WebLayout.vue'
+import CustomTab from '@/components/CustomTab.vue'
 
+const tab = ref('holdings')
 const list = ref([])
 const loading = ref(false)
+const upcoming = ref([])
+
+// 支持 ?tab=record 直达记分红视图
+onLoad((query) => {
+  if (query && query.tab === 'record') tab.value = 'record'
+})
 
 async function load() {
   loading.value = true
@@ -102,6 +136,19 @@ async function load() {
     uni.stopPullDownRefresh()
     // #endif
   }
+  try {
+    const res = await apiUpcoming()
+    upcoming.value = res.items || res || []
+  } catch (e) { /* toast 已统一处理 */ }
+}
+
+function fmtMoney(n) {
+  return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+function cSym(c) { return currencyMap[c]?.symbol || '' }
+function fmtDate(d) {
+  if (!d) return ''
+  return String(d).slice(5) // YYYY-MM-DD → MM-DD
 }
 
 function pnlClass(h) {
@@ -119,6 +166,33 @@ onPullDownRefresh(load)
 
 <style scoped>
 .page { padding: 24rpx; }
+
+/* 顶部功能切换 segment */
+.segment {
+  display: flex; background: #eef2f7; border-radius: 9999rpx;
+  padding: 6rpx; margin-bottom: 24rpx;
+}
+.seg-item {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  gap: 8rpx; height: 68rpx; border-radius: 9999rpx;
+  color: #64748b; font-size: 28rpx;
+}
+.seg-item.on {
+  background: #fff; color: #1e3a8a; font-weight: 600;
+  box-shadow: 0 2rpx 8rpx rgba(0, 0, 0, 0.08);
+}
+.seg-emoji { font-size: 30rpx; line-height: 1; }
+
+/* 记分红：待确认预告 */
+.upcoming-card { padding: 8rpx 28rpx; }
+.u-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 26rpx 0; border-bottom: 1rpx solid #f1f5f9;
+}
+.u-row:last-child { border-bottom: none; }
+.u-left { font-size: 26rpx; color: #1e293b; flex: 1; min-width: 0; }
+.u-right { font-size: 24rpx; flex-shrink: 0; margin-left: 16rpx; }
+.upcoming-empty { padding: 60rpx 0; text-align: center; font-size: 26rpx; color: #94a3b8; }
 
 /* v8：账户切换条 */
 .chips {

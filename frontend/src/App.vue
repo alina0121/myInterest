@@ -21,9 +21,9 @@ page {
 }
 
 /* #ifdef H5 */
-@media (min-width: 768px) {
-  uni-tabbar, .uni-tabbar, .uni-tabbar-bottom, .custom-tab-bar { display: none !important; }
-}
+/* H5 全端隐藏原生 TabBar，改用 CustomTab 组件（emoji 风格，参考 eatWhat）；
+   ≥768px 时 CustomTab 自身也会隐藏，仅保留 WebLayout 顶部导航 */
+uni-tabbar, .uni-tabbar, .uni-tabbar-bottom, .custom-tab-bar { display: none !important; }
 /* #endif */
 
 .card {

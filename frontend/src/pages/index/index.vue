@@ -109,6 +109,7 @@
     </view>
 
     <view style="height: 40rpx"></view>
+    <!-- #ifdef H5 --><CustomTab current="/pages/index/index" /><!-- #endif -->
   </view>
 </template>
 
@@ -120,6 +121,7 @@ import { userStore, setDisplayCurrency } from '@/store/user'
 import { fmtDisplay } from '@/utils/constants'
 // #ifdef H5
 import WebLayout from '@/components/WebLayout.vue'
+import CustomTab from '@/components/CustomTab.vue'
 // #endif
 
 // ---------- 数据 ----------

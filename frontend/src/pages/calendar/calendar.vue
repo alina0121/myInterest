@@ -97,6 +97,7 @@
     <view v-else class="card empty">本月暂无分红流水</view>
 
     <view style="height: 40rpx"></view>
+    <!-- #ifdef H5 --><CustomTab current="/pages/calendar/calendar" /><!-- #endif -->
   </view>
 </template>
 
@@ -107,6 +108,7 @@ import { apiCalendar } from '@/api'
 import { userStore } from '@/store/user'
 import { currencyMap } from '@/utils/constants'
 import WebLayout from '@/components/WebLayout.vue'
+import CustomTab from '@/components/CustomTab.vue'
 
 const now = new Date()
 const year = ref(now.getFullYear())
