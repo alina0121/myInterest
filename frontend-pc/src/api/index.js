@@ -77,8 +77,14 @@ export const apiAdminApproveSchedule = (id) => post(`/api/admin/schedules/${id}/
 export const apiAdminRejectSchedule = (id, reason) => post(`/api/admin/schedules/${id}/reject`, { reason })
 export const apiAdminBatchApprove = (ids, action, reason) =>
   post('/api/admin/schedules/batch-approve', { ids, action, reason })
-export const apiAdminCrawl = (market) =>
-  post(`/api/admin/schedules/crawl${market ? `?market=${market}` : ''}`)
+export const apiAdminCrawl = (market, code) => {
+  const q = new URLSearchParams()
+  if (market) q.set('market', market)
+  if (code) q.set('code', code)
+  const s = q.toString()
+  return post(`/api/admin/schedules/crawl${s ? `?${s}` : ''}`)
+}
+export const apiCrawlStatus = () => get('/api/admin/schedules/crawl/status')
 // 证券管理（爬虫白名单）
 export const apiAdminSecurities = (params) => get('/api/admin/securities', params)
 export const apiAdminCreateSecurity = (payload) => post('/api/admin/securities', payload)

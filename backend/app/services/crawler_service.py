@@ -14,7 +14,9 @@ import json
 import logging
 import os
 import re
+import threading
 import time
+from collections import deque
 from datetime import datetime
 
 import httpx
@@ -89,18 +91,22 @@ def _auto_status(pay_date: str | None, ex_date: str | None) -> str:
     return "published" if ref and ref < today_str() else "pending"
 
 
-def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, int]:
+def crawl_a_share(session: Session, page_size: int | None = None,
+                  code: str | None = None) -> tuple[int, int]:
     """抓取 A股分红送配预案，返回 (fetched, new_pending)。
 
     fetched=抓到的有效现金分红条数（跨页合计）；new_pending=实际新入库（去重后）条数。
     分页策略：按公告日倒序翻页，遇到「整页都已入库（无新增无升级）」即停止增量；
     单轮最多翻 _MAX_CRAWL_PAGES 页作为安全上限，避免接口异常时失控。
+    code 参数：仅抓取指定证券（东财接口支持 SECURITY_CODE 过滤）。
     """
     if page_size is None:
         page_size = config_service.get_int("crawl_a_share_page_size")
     page_size = max(10, min(500, int(page_size)))  # 东财接口单页范围，且避免 0/负数
 
     total_fetched, total_new = 0, 0
+    if code:
+        _clog(f"A股：目标代码 {code}（东财 SECURITY_CODE 过滤）")
 
     for page in range(1, _MAX_CRAWL_PAGES + 1):
         # 东财数据中心固定参数：RPT_SHAREBONUS_DET=分红送配明细报表
@@ -114,6 +120,8 @@ def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, 
             "source": "WEB",
             "client": "WEB",
         }
+        if code:
+            params["filter"] = f'(SECURITY_CODE="{code}")'
         data = _http_get_json(_SOURCE_URL, params)
         # 返回结构：{"result": {"data": [...]}}，无数据时 result 可能为 None
         rows = (data.get("result") or {}).get("data")
@@ -221,6 +229,8 @@ def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, 
         total_fetched += len(parsed)
         total_new += page_inserts
         session.commit()  # 每页提交一次，后续页失败不丢失已抓进度
+        _clog(f"A股第 {page} 页：解析 {len(parsed)} 条，新增 {page_inserts} 条，"
+              f"补全升级 {page_upgrades} 条")
 
         # 增量停止条件：本页既无新增也无升级 → 后续更老的页必然也都已入库
         if page_inserts == 0 and page_upgrades == 0:
@@ -232,14 +242,14 @@ def crawl_a_share(session: Session, page_size: int | None = None) -> tuple[int, 
     return total_fetched, total_new
 
 
-def crawl_us_stock(session: Session) -> tuple[int, int]:
+def crawl_us_stock(session: Session, code: str | None = None) -> tuple[int, int]:
     """抓取美股分红（Alpha Vantage）。
 
     优先用 DIVIDENDS 接口（返回精确的 ex_dividend_date/record_date/payment_date/
     dividend_amount），彻底解决旧月度接口「月初近似除权日导致同月多笔误判重复」的缺陷；
     该接口不可用（部分 key 不支持）时回退 TIME_SERIES_MONTHLY_ADJUSTED 月度汇总。
     API Key 取系统配置 av_api_key（后台可配），其次环境变量 XI_AV_API_KEY；
-    未配置则跳过并日志提示。返回 (fetched, new_pending)。
+    未配置则跳过并日志提示。code 参数：仅抓取指定代码。返回 (fetched, new_pending)。
     """
     api_key = config_service.get_text("av_api_key").strip()
     if not api_key:
@@ -248,16 +258,20 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
         return 0, 0
 
     fetched, new_pending = 0, 0
-    # 白名单优先从 securities 表读（crawl_enabled=True）；
-    # 表为空时用配置项兜底，并自动建 securities 记录标记为白名单
-    tickers = security_service.get_crawl_enabled_codes(session, "us_stock")
-    if not tickers:
-        tickers = config_service.get_list("crawl_us_tickers")
-        for t in tickers:
-            security_service.upsert_security(session, "us_stock", t, t, "USD", crawl_enabled=True)
-            security_service.set_crawl_enabled(session, "us_stock", t, True)
-        session.commit()
-        log.info("us_stock whitelist seeded from config: %s", tickers)
+    if code:
+        tickers = [code]
+        _clog(f"美股：目标代码 {code}")
+    else:
+        # 白名单优先从 securities 表读（crawl_enabled=True）；
+        # 表为空时用配置项兜底，并自动建 securities 记录标记为白名单
+        tickers = security_service.get_crawl_enabled_codes(session, "us_stock")
+        if not tickers:
+            tickers = config_service.get_list("crawl_us_tickers")
+            for t in tickers:
+                security_service.upsert_security(session, "us_stock", t, t, "USD", crawl_enabled=True)
+                security_service.set_crawl_enabled(session, "us_stock", t, True)
+            session.commit()
+            log.info("us_stock whitelist seeded from config: %s", tickers)
     sleep_sec = config_service.get_int("crawl_us_rate_sleep")
 
     # 串行拉白名单：Alpha Vantage 免费层限 5 次/分钟、25 次/天
@@ -265,6 +279,7 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
         if i > 0 and sleep_sec > 0:
             time.sleep(sleep_sec)  # 限速间隔（后台可配）
         sec = security_service.upsert_security(session, "us_stock", ticker, ticker, _US_CURRENCY)
+        prev_fetched, prev_new = fetched, new_pending
         # 主路径：精确 DIVIDENDS 接口
         try:
             data = _http_get_json(_AV_URL, {
@@ -306,6 +321,7 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
                 ))
                 new_pending += 1
             session.commit()
+            _clog(f"美股 {ticker}：新增 {new_pending - prev_new} 笔（DIVIDENDS 接口）")
             continue
 
         # 回退路径：旧月度接口（DIVIDENDS 不可用 / 返回空 data）
@@ -338,6 +354,7 @@ def crawl_us_stock(session: Session) -> tuple[int, int]:
             ))
             new_pending += 1
         session.commit()
+        _clog(f"美股 {ticker}：新增 {new_pending - prev_new} 笔（月度接口回退）")
 
     return fetched, new_pending
 
@@ -389,24 +406,28 @@ def _hk_parse_amount(plan_explain: str) -> tuple[float | None, str]:
     return amount, currency
 
 
-def crawl_hk_stock(session: Session) -> tuple[int, int]:
+def crawl_hk_stock(session: Session, code: str | None = None) -> tuple[int, int]:
     """抓取港股分红预案（东方财富港股 F10 分红送配）。
 
     数据源：datacenter.eastmoney.com reportName=RPT_HKF10_MAIN_DIVBASIC
     按白名单 (crawl_hk_tickers) 逐只拉取；每股金额从 PLAN_EXPLAIN 文本解析。
-    返回 (fetched, new_pending)。
+    code 参数：仅抓取指定代码。返回 (fetched, new_pending)。
     """
     fetched, new_pending = 0, 0
-    # 白名单优先从 securities 表读（crawl_enabled=True）；
-    # 表为空时用配置项兜底，并自动建 securities 记录标记为白名单
-    tickers = security_service.get_crawl_enabled_codes(session, "hk_stock")
-    if not tickers:
-        tickers = config_service.get_list("crawl_hk_tickers")
-        for t in tickers:
-            security_service.upsert_security(session, "hk_stock", t, t, "HKD", crawl_enabled=True)
-            security_service.set_crawl_enabled(session, "hk_stock", t, True)
-        session.commit()
-        log.info("hk_stock whitelist seeded from config: %s", tickers)
+    if code:
+        tickers = [code]
+        _clog(f"港股：目标代码 {code}")
+    else:
+        # 白名单优先从 securities 表读（crawl_enabled=True）；
+        # 表为空时用配置项兜底，并自动建 securities 记录标记为白名单
+        tickers = security_service.get_crawl_enabled_codes(session, "hk_stock")
+        if not tickers:
+            tickers = config_service.get_list("crawl_hk_tickers")
+            for t in tickers:
+                security_service.upsert_security(session, "hk_stock", t, t, "HKD", crawl_enabled=True)
+                security_service.set_crawl_enabled(session, "hk_stock", t, True)
+            session.commit()
+            log.info("hk_stock whitelist seeded from config: %s", tickers)
     sleep_sec = config_service.get_int("crawl_hk_rate_sleep")
     if not tickers:
         log.info("hk_stock crawl skipped: no crawl_enabled securities and config whitelist empty")
@@ -415,6 +436,7 @@ def crawl_hk_stock(session: Session) -> tuple[int, int]:
     for i, code in enumerate(tickers):
         if i > 0 and sleep_sec > 0:
             time.sleep(sleep_sec)
+        prev_new = new_pending
         try:
             data = _http_get_json(_HK_F10_URL, {
                 "reportName": _HK_REPORT, "columns": "ALL",
@@ -462,6 +484,7 @@ def crawl_hk_stock(session: Session) -> tuple[int, int]:
                 raw_title=str(row.get("PLAN_EXPLAIN") or f"{code} dividend")[:200],
             ))
             new_pending += 1
+        _clog(f"港股 {code}：新增 {new_pending - prev_new} 条")
 
     session.commit()
     return fetched, new_pending
@@ -473,17 +496,22 @@ _FUND_URL = "https://fund.eastmoney.com/Data/funddataIndex_Interface.aspx"
 _FUND_CURRENCY = "CNY"
 
 
-def crawl_fund(session: Session) -> tuple[int, int]:
+def crawl_fund(session: Session, code: str | None = None) -> tuple[int, int]:
     """抓取基金分红预案（天天基金分红列表）。
 
     数据源：fund.eastmoney.com/Data/funddataIndex_Interface.aspx?dt=8
     按登记日倒序分页增量抓取；返回 (fetched, new_pending)。
+    code 参数：仅保留指定代码的记录（接口不支持按代码过滤，逐页筛选）；
+    指定代码时关闭「无新增即停止」的增量判断，翻完 max_pages 找全该基金历史。
     响应为 JS 文本：var pageinfo=[total,pageSize,page]; var jjfh_data=[[code,name,rec,ex,dps,pay,type],...]
     """
     fetched, new_pending = 0, 0
     page_size = config_service.get_int("crawl_fund_page_size")
     max_pages = config_service.get_int("crawl_fund_max_pages")
     page_size = max(10, min(200, int(page_size)))
+    if code:
+        _clog(f"基金：目标代码 {code}（逐页筛选，最多 {max_pages} 页）")
+    target = code  # 行循环内的 code 会被行数据覆盖，先捕获目标代码
 
     for page in range(1, max_pages + 1):
         try:
@@ -513,6 +541,8 @@ def crawl_fund(session: Session) -> tuple[int, int]:
             if not isinstance(row, list) or len(row) < 6:
                 continue
             code, name = str(row[0] or ""), str(row[1] or "")
+            if target and code != target:
+                continue  # 指定代码：仅保留该基金的分红记录
             rec, ex, dps_str, pay = row[2], row[3], row[4], row[5]
             if not code or not name:
                 continue
@@ -542,8 +572,9 @@ def crawl_fund(session: Session) -> tuple[int, int]:
             new_pending += 1
 
         session.commit()  # 每页提交一次
-        # 增量停止：本页无新增 → 后续更老的页必然已入库
-        if page_inserts == 0:
+        _clog(f"基金第 {page} 页：本页新增 {page_inserts} 条")
+        # 增量停止：本页无新增 → 后续更老的页必然已入库（指定代码时翻完全部页找全历史）
+        if page_inserts == 0 and not target:
             break
         # 末页不足一页 → 没有更多数据
         if len(rows) < page_size:
@@ -554,15 +585,62 @@ def crawl_fund(session: Session) -> tuple[int, int]:
 
 # ──────────────────────── 统一调度 ────────────────────────
 
-def run_crawl(session: Session, market: str | None = None) -> dict:
+# 爬取运行状态（单进程内存态）：供后台页面轮询展示实时日志与进度。
+# 仅保留最近一次运行，服务重启即清空；持久化由 ops_logs / 日志文件覆盖。
+_run_lock = threading.Lock()
+_logs_buf: deque = deque(maxlen=300)
+_run_state: dict = {
+    "running": False, "market": None, "code": None,
+    "started_at": None, "finished_at": None, "result": None,
+}
+
+
+class _BufHandler(logging.Handler):
+    """把 xi.crawler 的日志行同步进内存缓冲（emit 里禁止再打日志，防递归）。"""
+
+    def emit(self, record):
+        try:
+            _logs_buf.append(f"[{time.strftime('%H:%M:%S')}] {record.getMessage()}")
+        except Exception:  # noqa: BLE001
+            pass
+
+
+def _clog(msg: str):
+    """爬取过程页面日志：带时间戳写入缓冲。"""
+    _logs_buf.append(f"[{time.strftime('%H:%M:%S')}] {msg}")
+
+
+log.addHandler(_BufHandler())
+
+
+def get_crawl_status() -> dict:
+    """返回最近一次爬取的运行状态与实时日志（后台页面轮询用）。"""
+    return {**_run_state, "logs": list(_logs_buf)}
+
+
+def run_crawl(session: Session, market: str | None = None,
+              code: str | None = None) -> dict:
     """立即触发采集（docs/04 §11.3 /crawl）。离线或失败返回 0 并附 message。
 
     market 参数：
       - None / 'all'：顺序执行所有市场分支
       - 'a_share' / 'us_stock' / 'hk_stock' / 'fund'：仅爬指定市场
-    任一分支异常不中断其他分支。
+    code 参数：指定单个证券代码爬取（必须同时指定 market；bond 无爬虫不支持）。
+    同一时刻只允许一个爬取任务（非阻塞锁）；过程日志写入内存缓冲供页面轮询。
     """
+    if code:
+        if not market or market == "all":
+            return {"fetched": 0, "new_pending": 0,
+                    "message": "指定证券爬取必须先选择市场"}
+        if market not in ("a_share", "us_stock", "hk_stock", "fund"):
+            return {"fetched": 0, "new_pending": 0,
+                    "message": f"{market} 市场不支持按证券爬取"}
+    if not _run_lock.acquire(blocking=False):
+        return {"fetched": 0, "new_pending": 0,
+                "message": "已有爬取任务在进行中，请查看爬取日志稍候"}
+
     if os.getenv("XI_CRAWL_OFFLINE", "") == "1":
+        _run_lock.release()
         return {"fetched": 0, "new_pending": 0, "message": "爬虫离线模式（XI_CRAWL_OFFLINE=1）"}
 
     targets = [market] if market and market != "all" else ["a_share", "us_stock", "hk_stock", "fund"]
@@ -576,29 +654,47 @@ def run_crawl(session: Session, market: str | None = None) -> dict:
         "fund": (crawl_fund, "fund: 天天基金分红接口暂时不可用"),
     }
 
-    for m in targets:
-        fn, err_msg = dispatch.get(m, (None, None))
-        if fn is None:
-            errors.append(f"{m}: 未知市场")
-            continue
-        try:
-            f, n = fn(session)
-            total_fetched += f
-            total_new += n
-        except Exception as e:
-            log.warning("%s crawl failed: %s", m, e)
-            session.rollback()
-            errors.append(err_msg)
-
-    msg = "；".join(errors) if errors else None
-    # 新预案入库后重算各标的派息频率（securities.freq 供持仓下拉默认带出）
+    _run_state.update(running=True, market=market or "all", code=code,
+                      started_at=now_str(), finished_at=None, result=None)
+    _logs_buf.clear()
+    target_desc = f"证券 {code}（{market}）" if code else (market or "全部市场")
+    _clog(f"🚀 开始爬取：{target_desc}")
     try:
-        security_service.refresh_all_freq(session)
-    except Exception as e:
-        log.warning("refresh security freq failed: %s", e)
-        session.rollback()
-    return {"fetched": total_fetched, "new_pending": total_new, "crawled_at": now_str(),
-            "date": today_str(), "message": msg}
+        for m in targets:
+            fn, err_msg = dispatch.get(m, (None, None))
+            if fn is None:
+                errors.append(f"{m}: 未知市场")
+                continue
+            if len(targets) > 1:
+                _clog(f"── {m} ──")
+            try:
+                f, n = fn(session, code=code)
+                total_fetched += f
+                total_new += n
+                _clog(f"✅ {m} 完成：抓取 {f} 条，新增 {n} 条")
+            except Exception as e:
+                log.warning("%s crawl failed: %s", m, e)
+                session.rollback()
+                errors.append(err_msg)
+                _clog(f"❌ {err_msg}（{e}）")
+
+        msg = "；".join(errors) if errors else None
+        # 新预案入库后重算各标的派息频率（securities.freq 供持仓下拉默认带出）
+        try:
+            security_service.refresh_all_freq(session)
+        except Exception as e:
+            log.warning("refresh security freq failed: %s", e)
+            session.rollback()
+        result = {"fetched": total_fetched, "new_pending": total_new,
+                  "crawled_at": now_str(), "date": today_str(), "message": msg}
+        _clog(f"🏁 爬取结束：共抓取 {total_fetched} 条，新增 {total_new} 条"
+              + (f"；{msg}" if msg else ""))
+        return result
+    finally:
+        _run_state.update(running=False, finished_at=now_str(),
+                          result={"fetched": total_fetched, "new_pending": total_new,
+                                  "message": "；".join(errors) if errors else None})
+        _run_lock.release()
 
 
 # ──────────────────────── 行情（最新价）抓取 ────────────────────────

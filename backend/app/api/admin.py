@@ -434,12 +434,19 @@ def reject_schedule(sid: int, body: ScheduleRejectIn, request: Request,
 @router.post("/schedules/crawl")
 def crawl_schedules(request: Request, session: Session = Depends(get_session),
                     admin: User = Depends(get_admin_user),
-                    market: str | None = Query(None, description="a_share/us_stock/hk_stock/fund/all，缺省=全市场")):
-    result = crawler_service.run_crawl(session, market=market)
+                    market: str | None = Query(None, description="a_share/us_stock/hk_stock/fund/all，缺省=全市场"),
+                    code: str | None = Query(None, description="指定证券代码（须同时指定 market；bond 无爬虫不支持）")):
+    result = crawler_service.run_crawl(session, market=market, code=code)
     _log(session, admin, request, "schedule.crawl", "schedule", None,
-         {"market": market, "result": result})
+         {"market": market, "code": code, "result": result})
     session.commit()
     return ok(result)
+
+
+@router.get("/schedules/crawl/status")
+def crawl_status(admin: User = Depends(get_admin_user)):
+    """最近一次爬取的运行状态与实时日志（后台「爬取日志」弹窗轮询）。"""
+    return ok(crawler_service.get_crawl_status())
 
 
 # ---------- 证券管理（爬虫白名单） ----------
