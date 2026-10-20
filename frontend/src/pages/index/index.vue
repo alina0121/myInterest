@@ -48,7 +48,18 @@
       </view>
     </view>
 
-    <!-- v8：显示币种切换弹窗（对齐 PC 端总览币种下拉） -->
+    <!-- 到账提醒条：有即将到账分红时展示，点击进入分红预告 -->
+    <view v-if="upcomingCount" :class="['soon-bar', soonHot ? 'hot' : '']" @click="goRecord">
+      <text class="soon-icon">🔔</text>
+      <view class="soon-text">
+        <text v-if="soonHot" class="soon-strong">{{ soonHot }} 笔分红 7 天内到账</text>
+        <text v-else class="soon-strong">近期有 {{ upcomingCount }} 笔分红待到账</text>
+        <text class="soon-sub">本月预计 ≈ ¥{{ fmt(soonMonthTotal) }}</text>
+      </view>
+      <text class="soon-arrow">›</text>
+    </view>
+
+    <!-- 币种切换弹窗 -->
     <view v-if="curVisible" class="modal-mask" @click="curVisible = false">
       <view class="modal-card" @click.stop>
         <view class="modal-title">显示币种</view>
@@ -69,42 +80,64 @@
     </view>
 
     <!-- ========== 分红趋势 ========== -->
-    <view class="m-section-title">分红趋势 · 近 12 个月</view>
+    <view class="m-section-title">
+      <text>分红趋势 · 近 12 个月</text>
+      <text class="m-section-extra">合计 {{ fmtDisplay(trendTotal, enhanced.display_currency) }}</text>
+    </view>
     <view class="m-chart-card">
+      <!-- 图例 + 交互提示 -->
+      <view class="m-chart-legend">
+        <view class="legend-item"><view class="legend-swatch green"></view><text>本月</text></view>
+        <view class="legend-item"><view class="legend-swatch avg"></view><text>月均 {{ fmtDisplay(avgAmount, enhanced.display_currency) }}</text></view>
+        <text class="legend-tip" v-if="selIdx < 0">点击柱子看金额</text>
+        <text class="legend-tip" v-else>{{ trend.months[selIdx] }} · {{ fmtDisplay(trend.amounts[selIdx], enhanced.display_currency) }}</text>
+      </view>
       <view class="m-bar-chart">
-        <view class="m-bar-col" v-for="(m, i) in trend.months" :key="i">
+        <!-- 月均虚线参考线 -->
+        <view class="avg-line" :style="{ bottom: (avgHeight + 26) + 'rpx' }" v-if="avgAmount > 0"></view>
+        <view class="m-bar-col" v-for="(m, i) in trend.months" :key="i" @click="pickBar(i)">
           <view class="m-bar-wrap">
-            <view class="m-bar" :style="{ height: barHeight(trend.amounts[i]) + 'rpx' }"></view>
+            <view class="m-bubble" v-if="selIdx === i" :style="{ bottom: (barHeight(trend.amounts[i]) + 14) + 'rpx' }">
+              {{ fmtDisplay(trend.amounts[i], enhanced.display_currency) }}
+            </view>
+            <view :class="['m-bar', m === curMonth ? 'cur' : '', trend.amounts[i] > 0 ? '' : 'zero', selIdx === i ? 'sel' : '']" :style="{ height: barHeight(trend.amounts[i]) + 'rpx' }"></view>
           </view>
-          <view class="m-bar-label">{{ m.slice(5) }}</view>
+          <view :class="['m-bar-label', m === curMonth ? 'cur' : '']">{{ m.slice(5) }}</view>
         </view>
       </view>
     </view>
 
-    <!-- ========== 持仓快照 ========== -->
-    <view class="m-section-title">持仓快照</view>
-    <view class="m-snapshot-card">
-      <view class="m-snapshot-row">
-        <text class="label">持仓只数</text>
-        <text class="value">{{ enhanced.holding_count || 0 }} 只</text>
+    <!-- ========== 持仓快照（紧凑宫格） ========== -->
+    <view class="m-section-title">
+      <text>持仓快照</text>
+      <text class="m-section-extra" @click="goHoldings">管理 ›</text>
+    </view>
+    <view class="snap-grid">
+      <view class="snap-cell">
+        <view class="snap-label">持仓只数</view>
+        <view class="snap-value">{{ enhanced.holding_count || 0 }} 只</view>
       </view>
-      <view class="m-snapshot-row">
-        <text class="label">累计收息</text>
-        <text class="value">{{ fmtDisplay(enhanced.total_received, enhanced.display_currency) }}</text>
+      <view class="snap-cell">
+        <view class="snap-label">累计收息</view>
+        <view class="snap-value green">{{ fmtDisplay(enhanced.total_received, enhanced.display_currency) }}</view>
       </view>
-      <view class="m-snapshot-row">
-        <text class="label">总市值</text>
-        <text class="value">{{ enhanced.market_value > 0 ? fmtDisplay(enhanced.market_value, enhanced.display_currency) : '—' }}</text>
+      <view class="snap-cell">
+        <view class="snap-label">总市值</view>
+        <view class="snap-value">{{ enhanced.market_value > 0 ? fmtDisplay(enhanced.market_value, enhanced.display_currency) : '—' }}</view>
       </view>
-      <view class="m-snapshot-row">
-        <text class="label">浮动盈亏</text>
-        <text class="value" :class="pnlClass(enhanced.floating_pnl)">
+      <view class="snap-cell">
+        <view class="snap-label">浮动盈亏</view>
+        <view class="snap-value" :class="pnlClass(enhanced.floating_pnl)">
           {{ enhanced.market_value > 0 ? (enhanced.floating_pnl >= 0 ? '+' : '') + fmtDisplay(enhanced.floating_pnl, enhanced.display_currency) : '—' }}
-        </text>
+        </view>
       </view>
-      <view class="m-snapshot-row">
-        <text class="label">净投入</text>
-        <text class="value">{{ fmtDisplay(enhanced.net_investment, enhanced.display_currency) }}</text>
+      <view class="snap-cell">
+        <view class="snap-label">净投入</view>
+        <view class="snap-value">{{ fmtDisplay(enhanced.net_investment, enhanced.display_currency) }}</view>
+      </view>
+      <view class="snap-cell">
+        <view class="snap-label">回本进度</view>
+        <view class="snap-value blue">{{ recoverPct }}</view>
       </view>
     </view>
 
@@ -116,7 +149,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { onShow, onPullDownRefresh } from '@dcloudio/uni-app'
-import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend, apiSaveSettings } from '@/api'
+import { apiEnhancedSummary, apiDashboardMetrics, apiMonthlyTrend, apiSaveSettings, apiUpcoming } from '@/api'
 import { userStore, setDisplayCurrency } from '@/store/user'
 import { fmtDisplay } from '@/utils/constants'
 // #ifdef H5
@@ -130,6 +163,9 @@ const registry = ref([])
 const selectedMetrics = ref([])
 const trend = ref({ months: [], amounts: [] })
 const curVisible = ref(false)
+const upcomingCount = ref(0)
+const soonHot = ref(0)          // 7 天内到账笔数
+const soonMonthTotal = ref(0)   // 本月预计到账（CNY）
 
 /** v8：币种选项（仅总览页生效，对齐 PC 端总览下拉） */
 const DISPLAY_CURRENCIES = [
@@ -176,6 +212,26 @@ const mainMetricKey = computed(() => selectedMetrics.value[0] || 'forecast_year'
 const mainMetric = computed(() => getMetricDef(mainMetricKey.value))
 const mainMetricName = computed(() => mainMetric.value?.name || '预测年度分红')
 
+/** 近 12 个月分红合计 */
+const trendTotal = computed(() => (trend.value.amounts || []).reduce((a, b) => a + Number(b || 0), 0))
+/** 月均分红（有值的月份） */
+const avgAmount = computed(() => {
+  const arr = (trend.value.amounts || []).map(Number).filter(v => v > 0)
+  return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0
+})
+const avgHeight = computed(() => barHeight(avgAmount.value))
+/** 点选的柱子索引 */
+const selIdx = ref(-1)
+function pickBar(i) { selIdx.value = selIdx.value === i ? -1 : i }
+/** 当前月份 YYYY-MM，用于柱状图高亮 */
+const curMonth = new Date().toISOString().slice(0, 7)
+/** 回本进度 = 累计收息 / 净投入 */
+const recoverPct = computed(() => {
+  const e = enhanced.value
+  if (!e.net_investment) return '—'
+  return (Math.min((e.total_received || 0) / e.net_investment, 9.99) * 100).toFixed(1) + '%'
+})
+
 // ---------- 指标工具 ----------
 function getMetricDef(key) {
   return registry.value.find(m => m.key === key)
@@ -219,21 +275,32 @@ function barHeight(v) {
 function goSettings() {
   uni.navigateTo({ url: '/pages/index/metrics' })
 }
+function goRecord() {
+  uni.switchTab({ url: '/pages/holdings/holdings' })
+}
+function goHoldings() {
+  uni.switchTab({ url: '/pages/holdings/holdings' })
+}
 
 // ---------- 加载 ----------
 async function load() {
   try {
     // v8：账户跟随 + 币种过滤（metrics 与账户/币种无关）
     const fp = filterParams()
-    const [enh, fm, t] = await Promise.all([
+    const [enh, fm, t, up] = await Promise.all([
       apiEnhancedSummary(fp),
       apiDashboardMetrics(),
       apiMonthlyTrend('12m', fp),
+      apiUpcoming(),
     ])
     enhanced.value = enh
     registry.value = fm.registry
     selectedMetrics.value = fm.selected
     trend.value = t
+    const items = up.items || []
+    upcomingCount.value = items.length
+    soonHot.value = items.filter(x => x.days_to_pay !== null && x.days_to_pay !== undefined && x.days_to_pay <= 7).length
+    soonMonthTotal.value = up.month_total_cny || 0
   } catch (e) { /* toast 已统一处理 */ }
   finally {
     // #ifdef MP-WEIXIN || MP-ALIPAY
@@ -419,8 +486,22 @@ onPullDownRefresh(load)
 .m-metric-value.positive { color: #16a34a; }
 .m-metric-value.negative { color: #dc2626; }
 
+/* ========== 到账提醒条 ========== */
+.soon-bar {
+  display: flex; align-items: center; gap: 16rpx;
+  background: #fff; border: 1px solid #eef0f4;
+  border-radius: 20rpx; padding: 22rpx 28rpx; margin: 0 16rpx 8rpx;
+  box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
+}
+.soon-bar.hot { background: #fffbeb; border-color: #fde68a; }
+.soon-icon { font-size: 36rpx; }
+.soon-text { flex: 1; display: flex; flex-direction: column; gap: 4rpx; min-width: 0; }
+.soon-strong { font-size: 26rpx; font-weight: 600; color: #1e293b; }
+.soon-bar.hot .soon-strong { color: #b45309; }
+.soon-sub { font-size: 22rpx; color: #94a3b8; }
+.soon-arrow { font-size: 40rpx; color: #cbd5e1; }
+
 /* ========== 通用区块标题 ========== */
-/* 加左侧色块强调，让标题更"实"以呼应 hero 的品牌蓝主色 */
 .m-section-title {
   font-size: 28rpx;
   font-weight: 600;
@@ -430,6 +511,12 @@ onPullDownRefresh(load)
   padding-left: 18rpx;
   display: flex;
   align-items: center;
+  justify-content: space-between;
+}
+.m-section-extra {
+  font-size: 22rpx;
+  font-weight: 400;
+  color: #94a3b8;
 }
 .m-section-title::before {
   content: '';
@@ -451,17 +538,39 @@ onPullDownRefresh(load)
   border: 1px solid #eef0f4;
   box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
 }
+/* 图例行 */
+.m-chart-legend {
+  display: flex; align-items: center; gap: 24rpx;
+  font-size: 20rpx; color: #94a3b8;
+  margin-bottom: 20rpx;
+}
+.legend-item { display: flex; align-items: center; gap: 8rpx; }
+.legend-swatch { width: 14rpx; height: 14rpx; border-radius: 4rpx; }
+.legend-swatch.green { background: #059669; }
+.legend-swatch.avg { width: 22rpx; height: 0; border-top: 2rpx dashed #94a3b8; border-radius: 0; }
+.legend-tip { margin-left: auto; font-size: 20rpx; color: #cbd5e1; }
+
 .m-bar-chart {
+  position: relative;
   display: flex;
   align-items: flex-end;
   height: 260rpx;
   gap: 4rpx;
+}
+/* 月均虚线参考线（bottom 由脚本计算，26 = 标签区高度补偿） */
+.avg-line {
+  position: absolute; left: 0; right: 0;
+  border-top: 2rpx dashed #cbd5e1;
+  pointer-events: none;
+  z-index: 0;
 }
 .m-bar-col {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
+  position: relative;
+  z-index: 1;
 }
 .m-bar-wrap {
   height: 220rpx;
@@ -469,38 +578,58 @@ onPullDownRefresh(load)
   align-items: flex-end;
   width: 100%;
   justify-content: center;
+  position: relative;
 }
 .m-bar {
-  width: 18rpx;
+  width: 20rpx;
   background: linear-gradient(180deg, #2563eb 0%, #3b82f6 100%);
-  border-radius: 4rpx 4rpx 0 0;
+  border-radius: 6rpx 6rpx 0 0;
   min-height: 4rpx;
 }
+/* 当月柱高亮为绿色，突出"本月已收" */
+.m-bar.cur { background: linear-gradient(180deg, #059669 0%, #34d399 100%); }
+/* 零值月：浅灰矮柱 */
+.m-bar.zero { background: #e2e8f0; height: 4rpx !important; }
+/* 选中柱加深 */
+.m-bar.sel { filter: saturate(1.4) brightness(0.85); }
+/* 金额气泡 */
+.m-bubble {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  background: #1e293b; color: #fff;
+  font-size: 20rpx; padding: 6rpx 14rpx; border-radius: 10rpx;
+  white-space: nowrap; z-index: 3;
+}
+.m-bubble::after {
+  content: '';
+  position: absolute; left: 50%; bottom: -8rpx; transform: translateX(-50%);
+  border: 5rpx solid transparent; border-top-color: #1e293b;
+}
 .m-bar-label { font-size: 18rpx; color: #94a3b8; margin-top: 8rpx; }
+.m-bar-label.cur { color: #059669; font-weight: 600; }
 
-/* ========== 持仓快照 ========== */
-/* 优化：与趋势卡同样的阴影层次 */
-.m-snapshot-card {
-  background: linear-gradient(180deg, #fafbfc 0%, #fff 100%);
-  border-radius: 16rpx;
+/* ========== 持仓快照（2 列宫格，替代原 5 行长列表） ========== */
+.snap-grid {
+  display: flex; flex-wrap: wrap;
+  background: #fff;
+  border-radius: 20rpx;
   margin: 0 16rpx;
   border: 1px solid #eef0f4;
   overflow: hidden;
   box-shadow: 0 4rpx 16rpx rgba(15, 23, 42, 0.04);
 }
-.m-snapshot-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 24rpx 28rpx;
+.snap-cell {
+  width: 50%; box-sizing: border-box;
+  padding: 26rpx 28rpx;
   border-bottom: 1px solid #f1f5f9;
-  font-size: 26rpx;
 }
-.m-snapshot-row:last-child { border-bottom: none; }
-.m-snapshot-row .label { color: #64748b; }
-.m-snapshot-row .value { font-weight: 600; color: #1e293b; }
-.m-snapshot-row .value.positive { color: #16a34a; }
-.m-snapshot-row .value.negative { color: #dc2626; }
+.snap-cell:nth-child(odd) { border-right: 1px solid #f1f5f9; }
+.snap-cell:nth-last-child(-n+2) { border-bottom: none; }
+.snap-label { font-size: 22rpx; color: #94a3b8; margin-bottom: 10rpx; }
+.snap-value { font-size: 30rpx; font-weight: 700; color: #1e293b; }
+.snap-value.positive { color: #16a34a; }
+.snap-value.negative { color: #dc2626; }
+.snap-value.green { color: #059669; }
+.snap-value.blue { color: #1e3a8a; }
 
 /* #ifdef H5 */
 @media (min-width: 768px) {

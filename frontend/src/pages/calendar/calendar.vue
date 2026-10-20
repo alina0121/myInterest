@@ -5,19 +5,22 @@
     <view class="nav">
       <view class="nav-btn" @click="prev">‹</view>
       <view class="nav-title">{{ year }} 年 {{ month }} 月</view>
-      <view class="nav-btn" @click="next">›</view>
+      <view class="nav-right">
+        <view v-if="!isCurrentMonth" class="today-btn" @click="goToday">今</view>
+        <view class="nav-btn" @click="next">›</view>
+      </view>
     </view>
 
-    <!-- 月汇总 -->
+    <!-- 月汇总（渐变卡，与分红预告页合计条同风格） -->
     <view class="sum">
       <view class="sum-cell">
-        <view class="sum-val text-emerald">¥{{ fmt(data.month_confirmed) }}</view>
-        <view class="sum-label">本月已到账</view>
+        <view class="sum-val sum-green">¥{{ fmt(data.month_confirmed) }}</view>
+        <view class="sum-label">本月已到账 · {{ confirmedCount }} 笔</view>
       </view>
       <view class="sum-divider"></view>
       <view class="sum-cell">
-        <view class="sum-val text-amber">¥{{ fmt(data.month_pending) }}</view>
-        <view class="sum-label">预告中</view>
+        <view class="sum-val sum-amber">¥{{ fmt(data.month_pending) }}</view>
+        <view class="sum-label">预告中 · {{ pendingCount }} 笔</view>
       </view>
     </view>
 
@@ -28,15 +31,21 @@
       </view>
       <view class="days">
         <view v-for="(cell, i) in cells" :key="i"
-              :class="['day-cell', cell.day ? '' : 'blank', selectedDay === cell.day ? 'sel' : '']"
+              :class="['day-cell', cell.day ? '' : 'blank', selectedDay === cell.day ? 'sel' : '', hasDiv(cell.day) ? 'has-div' : '']"
               @click="cell.day && selectDay(cell.day)">
-          <text :class="['d-num', hasDiv(cell.day) ? 'has' : '']">{{ cell.day || '' }}</text>
+          <text :class="['d-num', hasDiv(cell.day) ? 'has' : '', isToday(cell.day) ? 'today' : '', selectedDay === cell.day ? 'sel-num' : '']">{{ cell.day || '' }}</text>
           <view v-if="dayItems(cell.day).length" class="d-dots">
             <view v-for="(d, j) in dayItems(cell.day)" :key="j"
                   class="dot"
                   :style="{ background: d.status === 'confirmed' ? '#059669' : '#d97706' }"></view>
           </view>
         </view>
+      </view>
+      <!-- 图例 -->
+      <view class="cal-legend">
+        <view class="lg-item"><view class="dot" style="background:#059669"></view><text>已到账</text></view>
+        <view class="lg-item"><view class="dot" style="background:#d97706"></view><text>预告中</text></view>
+        <text class="lg-tip" v-if="isCurrentMonth">点日期看明细</text>
       </view>
     </view>
 
@@ -118,6 +127,30 @@ const data = ref({ days: {} })
 
 const weeks = ['日', '一', '二', '三', '四', '五', '六']
 
+/** 是否正在查看当前月 */
+const isCurrentMonth = computed(() =>
+  year.value === now.getFullYear() && month.value === now.getMonth() + 1)
+function isToday(day) {
+  return isCurrentMonth.value && day === now.getDate()
+}
+function goToday() {
+  year.value = now.getFullYear()
+  month.value = now.getMonth() + 1
+  load()
+}
+
+/** 各状态笔数（图例/汇总用） */
+const confirmedCount = computed(() => {
+  let n = 0
+  Object.values(data.value.days || {}).forEach(list => { n += list.filter(d => d.status === 'confirmed').length })
+  return n
+})
+const pendingCount = computed(() => {
+  let n = 0
+  Object.values(data.value.days || {}).forEach(list => { n += list.filter(d => d.status !== 'confirmed').length })
+  return n
+})
+
 function fmt(n) {
   return Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
@@ -165,6 +198,13 @@ async function load() {
     params.account = userStore.currentAccount
   }
   data.value = await apiCalendar(year.value, month.value, params)
+  // 当前月自动聚焦最近一次待到账日（>= 今天），让用户一进来就看到"钱什么时候来"
+  if (isCurrentMonth.value) {
+    const today = now.getDate()
+    const upcoming = Object.keys(data.value.days || {})
+      .map(Number).filter(d => d >= today).sort((a, b) => a - b)
+    selectedDay.value = upcoming.length ? upcoming[0] : null
+  }
   // #ifdef MP-WEIXIN || MP-ALIPAY
   uni.stopPullDownRefresh()
   // #endif
@@ -187,28 +227,58 @@ onPullDownRefresh(load)
 <style scoped>
 .nav { display: flex; align-items: center; justify-content: space-between; padding: 24rpx 40rpx 0; }
 .nav-btn { font-size: 48rpx; color: #1e3a8a; width: 80rpx; text-align: center; }
+.nav-right { display: flex; align-items: center; }
 .nav-title { font-size: 32rpx; font-weight: 700; color: #1e293b; }
+.today-btn {
+  width: 56rpx; height: 56rpx; line-height: 56rpx; text-align: center;
+  font-size: 26rpx; font-weight: 600; color: #1e3a8a;
+  background: #eff6ff; border-radius: 50%; margin-right: 8rpx;
+}
 
 .sum {
-  display: flex; margin: 20rpx 24rpx 0; background: #fff;
+  display: flex; margin: 20rpx 24rpx 0;
+  background: linear-gradient(135deg, #1e3a8a, #2d4ea8);
   border-radius: 24rpx; padding: 32rpx 26rpx;
-  box-shadow: 0 2rpx 6rpx rgba(0, 0, 0, 0.06);
+  box-shadow: 0 6rpx 16rpx rgba(30, 58, 138, 0.25);
 }
 .sum-cell { flex: 1; text-align: center; }
-.sum-divider { width: 1rpx; background: #f1f5f9; margin: 8rpx 0; }
-.sum-val { font-size: 36rpx; font-weight: 700; }
-.sum-label { font-size: 22rpx; color: #94a3b8; margin-top: 8rpx; }
+.sum-divider { width: 1rpx; background: rgba(255, 255, 255, 0.2); margin: 8rpx 0; }
+.sum-val { font-size: 36rpx; font-weight: 700; color: #fff; }
+.sum-val.sum-green { color: #6ee7b7; }
+.sum-val.sum-amber { color: #fcd34d; }
+.sum-label { font-size: 22rpx; color: rgba(255, 255, 255, 0.7); margin-top: 8rpx; }
 
 .cal { padding: 20rpx; }
 .week, .days { display: flex; flex-wrap: wrap; }
 .w-cell { width: calc(100% / 7); text-align: center; font-size: 24rpx; color: #94a3b8; padding: 12rpx 0; }
-.day-cell { width: calc(100% / 7); height: 96rpx; display: flex; flex-direction: column; align-items: center; padding-top: 12rpx; }
+.day-cell {
+  width: calc(100% / 7); height: 96rpx;
+  display: flex; flex-direction: column; align-items: center; padding-top: 12rpx;
+  border-radius: 12rpx;
+}
 .day-cell.blank { visibility: hidden; }
-.day-cell.sel { background: #eff6ff; border-radius: 12rpx; }
-.d-num { font-size: 28rpx; color: #475569; }
+.day-cell.has-div { background: #f6f8fb; }
+.day-cell.sel { background: #eff6ff; box-shadow: inset 0 0 0 2rpx #93c5fd; }
+.d-num {
+  width: 52rpx; height: 52rpx; line-height: 52rpx; text-align: center;
+  font-size: 28rpx; color: #475569; border-radius: 50%;
+}
 .d-num.has { color: #1e3a8a; font-weight: 700; }
-.d-dots { display: flex; gap: 6rpx; margin-top: 8rpx; }
+/* 今天：蓝色描边圈 */
+.d-num.today { box-shadow: inset 0 0 0 3rpx #2563eb; color: #2563eb; font-weight: 700; }
+/* 选中：实心蓝圆白字 */
+.d-num.sel-num { background: #1e3a8a; color: #fff !important; font-weight: 700; }
+.d-dots { display: flex; gap: 6rpx; margin-top: 6rpx; height: 12rpx; }
 .dot { width: 12rpx; height: 12rpx; border-radius: 50%; }
+
+/* 图例 */
+.cal-legend {
+  display: flex; align-items: center; gap: 28rpx;
+  padding: 16rpx 12rpx 4rpx; font-size: 20rpx; color: #94a3b8;
+}
+.lg-item { display: flex; align-items: center; gap: 8rpx; }
+.lg-item .dot { width: 10rpx; height: 10rpx; }
+.lg-tip { margin-left: auto; }
 .day-row { display: flex; align-items: center; gap: 16rpx; padding: 20rpx 0; border-bottom: 1rpx solid #f1f5f9; }
 .day-row:last-child { border-bottom: none; }
 .dr-name { font-size: 28rpx; font-weight: 500; }

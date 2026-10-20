@@ -2,7 +2,8 @@
 
 造数据流程：
 1. 创建/复用 demo 用户（用户名 demo，密码登录已下线，登录走邮箱验证码 demo@xi.com）
-2. 10 只股票多市场持仓 + 多批次买入（A 股 5 + 美股 3 + 港股 1 + 基金 1）
+2. 17 只多市场持仓 + 多批次买入（A 股 5 + 美股 5 + 港股 3 + 基金 3 + 债券 1），
+   并写入 securities.latest_price 保证市值/盈亏有数
 3. 直接写 dividend_schedules（status=published），无需手动造 Dividend 记录
    —— v0.3 分红实时计算接口会自动从预案 + 持仓批次派生。
 
@@ -25,7 +26,7 @@ from sqlmodel import Session, select
 
 from app.database import engine
 from app.db_init import init_db
-from app.models import DividendSchedule, Holding, Lot, User
+from app.models import DividendSchedule, Holding, Lot, Security, User
 from app.services.crawler_service import run_crawl
 from app.services.security_service import upsert_security
 from app.utils.security import hash_password
@@ -33,10 +34,24 @@ from app.utils.security import hash_password
 DEMO_USERNAME = "demo"
 # 密码登录体系已下线：password_hash 仅存随机占位值（与 wx-login 建号一致）
 
+
+def _monthly(start=(2025, 4), end=(2026, 9), rate=(2025, 0.264), rate2=(2026, 0.268)):
+    """ Realty Income 月度分红：ex=月初、pay=当月 15 日，按年分档 dps。"""
+    rates = {rate[0]: rate[1], rate2[0]: rate2[1]}
+    rows, y, m = [], start[0], start[1]
+    while (y, m) <= end:
+        rows.append((f"{y}-{m:02d}-01", f"{y}-{m:02d}-01", f"{y}-{m:02d}-15",
+                     rates[y], f"{y} 年 {m} 月月度分红"))
+        m += 1
+        if m > 12:
+            y, m = y + 1, 1
+    return rows
+
+
 PORTFOLIO = [
     {
         "market": "a_share", "code": "600519", "name": "贵州茅台",
-        "currency": "CNY", "freq": "annual", "account": "华泰证券",
+        "currency": "CNY", "freq": "annual", "account": "华泰证券", "price": 1520.0,
         "lots": [
             ("2022-03-15", "buy", 60, 1580.0, 5.0),
             ("2023-09-20", "buy", 40, 1600.0, 5.0),
@@ -48,7 +63,7 @@ PORTFOLIO = [
     },
     {
         "market": "a_share", "code": "601398", "name": "工商银行",
-        "currency": "CNY", "freq": "semi_annual", "account": "华泰证券",
+        "currency": "CNY", "freq": "semi_annual", "account": "华泰证券", "price": 6.90,
         "lots": [
             ("2023-03-15", "buy", 3000, 4.50, 5.0),
             ("2024-01-10", "buy", 2000, 4.80, 5.0),
@@ -60,7 +75,7 @@ PORTFOLIO = [
     },
     {
         "market": "a_share", "code": "601088", "name": "中国神华",
-        "currency": "CNY", "freq": "annual", "account": "中信证券",
+        "currency": "CNY", "freq": "annual", "account": "中信证券", "price": 39.5,
         "lots": [
             ("2023-05-10", "buy", 2000, 28.50, 5.0),
             ("2024-02-15", "buy", 1000, 32.00, 5.0),
@@ -71,7 +86,7 @@ PORTFOLIO = [
     },
     {
         "market": "a_share", "code": "600036", "name": "招商银行",
-        "currency": "CNY", "freq": "semi_annual", "account": "华泰证券",
+        "currency": "CNY", "freq": "semi_annual", "account": "华泰证券", "price": 48.5,
         "lots": [
             ("2022-11-20", "buy", 1000, 42.00, 5.0),
             ("2024-03-10", "buy", 500, 38.50, 5.0),
@@ -83,7 +98,7 @@ PORTFOLIO = [
     },
     {
         "market": "a_share", "code": "600900", "name": "长江电力",
-        "currency": "CNY", "freq": "annual", "account": "中信证券",
+        "currency": "CNY", "freq": "annual", "account": "中信证券", "price": 28.6,
         "lots": [
             ("2023-07-18", "buy", 3000, 22.00, 5.0),
         ],
@@ -93,7 +108,7 @@ PORTFOLIO = [
     },
     {
         "market": "us_stock", "code": "AAPL", "name": "Apple",
-        "currency": "USD", "freq": "quarterly", "account": "富途牛牛",
+        "currency": "USD", "freq": "quarterly", "account": "富途牛牛", "price": 255.0,
         "lots": [
             ("2022-08-15", "buy", 50, 165.0, 1.0),
             ("2023-04-10", "buy", 30, 165.0, 1.0),
@@ -106,7 +121,7 @@ PORTFOLIO = [
     },
     {
         "market": "us_stock", "code": "MSFT", "name": "Microsoft",
-        "currency": "USD", "freq": "quarterly", "account": "富途牛牛",
+        "currency": "USD", "freq": "quarterly", "account": "富途牛牛", "price": 505.0,
         "lots": [
             ("2023-01-20", "buy", 30, 240.0, 1.0),
             ("2024-08-01", "buy", 20, 420.0, 1.0),
@@ -119,7 +134,7 @@ PORTFOLIO = [
     },
     {
         "market": "us_stock", "code": "KO", "name": "Coca-Cola",
-        "currency": "USD", "freq": "quarterly", "account": "富途牛牛",
+        "currency": "USD", "freq": "quarterly", "account": "富途牛牛", "price": 70.5,
         "lots": [
             ("2022-06-10", "buy", 200, 60.0, 1.0),
             ("2024-01-15", "buy", 100, 58.0, 1.0),
@@ -130,8 +145,28 @@ PORTFOLIO = [
         ],
     },
     {
+        "market": "us_stock", "code": "O", "name": "Realty Income",
+        "currency": "USD", "freq": "monthly", "account": "长桥证券", "price": 58.6,
+        "lots": [
+            ("2024-09-10", "buy", 300, 57.0, 1.0),
+        ],
+        "schedules": _monthly(),  # 2025-04 ~ 2026-09 每月一派，月历"每月有点"效果
+    },
+    {
+        "market": "us_stock", "code": "PG", "name": "P&G 宝洁",
+        "currency": "USD", "freq": "quarterly", "account": "长桥证券", "price": 168.0,
+        "lots": [
+            ("2023-10-08", "buy", 60, 150.0, 1.0),
+        ],
+        "schedules": [
+            ("2026-01-23", "2026-01-22", "2026-02-13", 1.0413, "2026 Q2 分红"),
+            ("2026-04-24", "2026-04-23", "2026-05-15", 1.0568, "2026 Q3 分红"),
+            ("2026-07-24", "2026-07-23", "2026-08-14", 1.0568, "2026 Q4 分红"),
+        ],
+    },
+    {
         "market": "hk_stock", "code": "00700", "name": "腾讯控股",
-        "currency": "HKD", "freq": "quarterly", "account": "富途牛牛",
+        "currency": "HKD", "freq": "quarterly", "account": "富途牛牛", "price": 585.0,
         "lots": [
             ("2022-09-20", "buy", 200, 320.0, 50.0),
             ("2024-04-15", "buy", 100, 380.0, 50.0),
@@ -142,8 +177,33 @@ PORTFOLIO = [
         ],
     },
     {
+        "market": "hk_stock", "code": "00005", "name": "汇丰控股",
+        "currency": "HKD", "freq": "quarterly", "account": "富途牛牛", "price": 78.5,
+        "lots": [
+            ("2023-06-15", "buy", 400, 62.0, 50.0),
+            ("2025-02-10", "buy", 200, 75.0, 50.0),
+        ],
+        "schedules": [
+            ("2025-09-18", "2025-09-18", "2025-09-25", 0.31, "2025 第三次中期股息"),
+            ("2026-03-19", "2026-03-19", "2026-03-26", 0.31, "2026 第一次中期股息"),
+            ("2026-06-18", "2026-06-18", "2026-06-25", 0.31, "2026 第二次中期股息"),
+        ],
+    },
+    {
+        "market": "hk_stock", "code": "00883", "name": "中国海洋石油",
+        "currency": "HKD", "freq": "semi_annual", "account": "富途牛牛", "price": 19.8,
+        "lots": [
+            ("2024-05-20", "buy", 2000, 17.5, 50.0),
+        ],
+        "schedules": [
+            ("2025-09-04", "2025-09-03", "2025-09-11", 0.74, "2025 中期股息"),
+            ("2026-05-27", "2026-05-26", "2026-06-25", 0.70, "2025 末期股息"),
+            ("2026-09-10", "2026-09-09", "2026-09-26", 0.74, "2026 中期股息"),
+        ],
+    },
+    {
         "market": "fund", "code": "005827", "name": "易方达蓝筹",
-        "currency": "CNY", "freq": "annual", "account": "蚂蚁基金",
+        "currency": "CNY", "freq": "annual", "account": "蚂蚁基金", "price": 2.85,
         "lots": [
             ("2023-02-10", "buy", 10000, 2.50, 0.0),
             ("2024-03-05", "buy", 5000, 2.20, 0.0),
@@ -151,6 +211,38 @@ PORTFOLIO = [
         "schedules": [
             ("2024-08-20", "2024-08-20", "2024-08-21", 0.092, "2023 年度分红"),
             ("2025-08-20", "2025-08-20", "2025-08-21", 0.10, "2024 年度分红"),
+        ],
+    },
+    {
+        "market": "fund", "code": "110022", "name": "易方达消费行业",
+        "currency": "CNY", "freq": "annual", "account": "蚂蚁基金", "price": 6.85,
+        "lots": [
+            ("2023-04-12", "buy", 5000, 5.20, 0.0),
+        ],
+        "schedules": [
+            ("2026-01-15", "2026-01-15", "2026-01-16", 0.25, "2025 年度分红"),
+        ],
+    },
+    {
+        "market": "fund", "code": "270048", "name": "广发纯债债券C",
+        "currency": "CNY", "freq": "quarterly", "account": "天天基金", "price": 1.12,
+        "lots": [
+            ("2024-06-18", "buy", 20000, 1.10, 0.0),
+        ],
+        "schedules": [
+            ("2026-02-10", "2026-02-10", "2026-02-11", 0.035, "2025 四季度收益分配"),
+            ("2026-05-12", "2026-05-12", "2026-05-13", 0.032, "2026 一季度收益分配"),
+            ("2026-08-11", "2026-08-11", "2026-08-12", 0.033, "2026 二季度收益分配"),
+        ],
+    },
+    {
+        "market": "bond", "code": "019542", "name": "24国债12",
+        "currency": "CNY", "freq": "annual", "account": "招商银行App", "price": 100.5,
+        "lots": [
+            ("2023-11-08", "buy", 1000, 100.2, 0.0),
+        ],
+        "schedules": [
+            ("2026-03-20", "2026-03-19", "2026-03-21", 2.29, "2026 年度付息"),
         ],
     },
 ]
@@ -174,6 +266,14 @@ PENDING_SCHEDULES = [
      4.50, "HKD", "crawler", 0.90, "2026 Q1 季度分红预案"),
     ("fund", "005827", "易方达蓝筹", "2027-08-20", "2027-08-20", "2027-08-21",
      0.11, "CNY", "manual", 0.60, "2026 年度分红预案（待公告）"),
+    ("hk_stock", "00883", "中国海洋石油", "2027-05-26", "2027-05-25", "2027-06-24",
+     0.72, "HKD", "crawler", 0.90, "2026 末期股息预案"),
+    ("us_stock", "PG", "P&G 宝洁", "2027-01-22", "2027-01-21", "2027-02-12",
+     1.09, "USD", "crawler", 0.90, "2027 Q2 季度分红预案"),
+    ("fund", "110022", "易方达消费行业", "2027-01-15", "2027-01-15", "2027-01-16",
+     0.28, "CNY", "manual", 0.60, "2026 年度分红预案（待公告）"),
+    ("bond", "019542", "24国债12", "2027-03-20", "2027-03-19", "2027-03-21",
+     2.29, "CNY", "manual", 0.60, "2027 年度付息预案（待公告）"),
 ]
 
 
@@ -187,6 +287,11 @@ UPCOMING_PUBLISHED = [
     ("us_stock", "KO", "2026-12-04", "2026-12-04", "2026-12-15", 0.51, "2026 Q4 分红"),
     ("a_share", "600900", "2026-07-16", "2026-07-15", "2026-07-20", 0.85, "2025 年度分红"),
     ("a_share", "601398", "2026-05-12", "2026-05-11", "2026-05-15", 0.30, "2025 年度分红"),
+    ("us_stock", "O", "2026-11-02", "2026-11-02", "2026-11-13", 0.274, "2026 年 11 月月度分红"),
+    ("us_stock", "O", "2026-12-01", "2026-12-01", "2026-12-15", 0.274, "2026 年 12 月月度分红"),
+    ("us_stock", "PG", "2026-10-23", "2026-10-23", "2026-11-16", 1.0719, "2026 Q4 季度分红"),
+    ("hk_stock", "00005", "2026-11-20", "2026-11-20", "2026-11-27", 0.31, "2026 第三次中期股息"),
+    ("fund", "270048", "2026-11-10", "2026-11-10", "2026-11-11", 0.031, "2026 三季度收益分配"),
 ]
 
 
@@ -245,9 +350,13 @@ def create_holding_with_lots(session: Session, user: User, spec: dict) -> Holdin
                         shares=shares, price=price, fee=fee))
     session.commit()
     session.refresh(h)
-    # 确保 securities 表里有这条（爬虫没跑时也能显示 name）
-    upsert_security(session, h.market, h.code, h.name, h.currency)
+    # 确保 securities 表里有这条（爬虫没跑时也能显示 name），并写入演示现价
+    sec = upsert_security(session, h.market, h.code, h.name, h.currency)
+    if spec.get("price"):
+        sec.latest_price = spec["price"]
+        h.current_price = spec["price"]  # 持仓快照同步，避免依赖价格任务
     session.commit()
+    session.refresh(h)
     return h
 
 
@@ -338,7 +447,7 @@ def main() -> None:
         user = get_or_create_demo_user(session)
         clean_demo_data(session, user)
 
-        print(f"\n>>> 为 {user.username} 创建 10 只股票多市场持仓与预案...")
+        print(f"\n>>> 为 {user.username} 创建 {len(PORTFOLIO)} 只多市场持仓与预案...")
         total_h, total_l, total_s = 0, 0, 0
         for spec in PORTFOLIO:
             h = create_holding_with_lots(session, user, spec)
