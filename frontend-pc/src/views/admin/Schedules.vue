@@ -36,16 +36,18 @@
           <el-button type="danger" :disabled="!selectedIds.length" :loading="saving" @click="batchReject">批量驳回</el-button>
         </template>
         <el-button @click="crawlDlg = true">手动录入</el-button>
-        <el-dropdown @command="crawl" trigger="click" :disabled="crawling">
+        <el-dropdown @command="onCrawlCmd" trigger="click" :disabled="crawling">
           <el-button type="primary" :loading="crawling">
             立即爬取<el-icon class="el-icon--right"><arrow-down /></el-icon>
           </el-button>
           <template #dropdown>
             <el-dropdown-menu>
               <el-dropdown-item command="all">全部市场</el-dropdown-item>
-              <el-dropdown-item v-for="m in MARKETS" :key="m.value" :command="m.value">
+              <el-dropdown-item v-for="m in crawlMarkets" :key="m.value" :command="m.value">
                 仅{{ m.label }}
               </el-dropdown-item>
+              <el-dropdown-item command="one" divided>🎯 指定证券爬取</el-dropdown-item>
+              <el-dropdown-item command="logs">📜 爬取日志</el-dropdown-item>
             </el-dropdown-menu>
           </template>
         </el-dropdown>
@@ -149,14 +151,52 @@
         <el-button type="danger" :loading="saving" @click="confirmReject">确认驳回</el-button>
       </template>
     </el-dialog>
+
+    <!-- 指定证券爬取 -->
+    <el-dialog v-model="oneDlg" title="指定证券爬取" width="480">
+      <el-form label-width="80px">
+        <el-form-item label="市场">
+          <el-select v-model="oneMarket" style="width: 100%" placeholder="先选市场和类型" @change="oneCode = ''; loadSecOptions()">
+            <el-option v-for="m in crawlMarkets" :key="m.value" :label="m.label" :value="m.value" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="证券">
+          <el-select v-model="oneCode" filterable :loading="secLoading"
+                     :placeholder="oneMarket ? '搜索代码或名称' : '请先选择市场'" :disabled="!oneMarket" style="width: 100%">
+            <el-option v-for="s in secOptions" :key="s.id" :label="`${s.code} ${s.name}`" :value="s.code" />
+          </el-select>
+        </el-form-item>
+      </el-form>
+      <p class="conf-rule" style="margin-top: 0">💡 仅列出该市场已入库证券；债券无爬虫数据源，请用「手动录入」。</p>
+      <template #footer>
+        <el-button @click="oneDlg = false">取消</el-button>
+        <el-button type="primary" :loading="crawling" :disabled="!oneMarket || !oneCode" @click="crawlOne">开始爬取</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 爬取日志 -->
+    <el-dialog v-model="logDlg" title="🕷️ 爬取日志" width="640" @closed="stopLogPoll">
+      <div class="log-head">
+        <el-tag :type="logStatus.running ? 'warning' : 'info'" size="small">
+          {{ logStatus.running ? '爬取进行中…' : '空闲' }}
+        </el-tag>
+        <span class="text-muted log-time">
+          {{ logStatus.started_at ? `开始 ${logStatus.started_at.slice(11, 19)}` : '尚未运行' }}<template v-if="logStatus.finished_at"> · 结束 {{ logStatus.finished_at.slice(11, 19) }}</template>
+        </span>
+      </div>
+      <div ref="logBox" class="log-box">
+        <div v-for="(l, i) in logStatus.logs" :key="i" class="log-line">{{ l }}</div>
+        <div v-if="!logStatus.logs.length" class="log-empty">暂无日志，点「立即爬取」后此处实时显示过程</div>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { onMounted, reactive, ref } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown } from '@element-plus/icons-vue'
-import { apiAdminSchedules, apiAdminCreateSchedule, apiAdminApproveSchedule, apiAdminRejectSchedule, apiAdminCrawl, apiAdminBatchApprove } from '../../api'
+import { apiAdminSchedules, apiAdminCreateSchedule, apiAdminApproveSchedule, apiAdminRejectSchedule, apiAdminCrawl, apiCrawlStatus, apiAdminBatchApprove, apiAdminSecurities } from '../../api'
 import { MARKETS, marketMap } from '../../utils/constants'
 
 const market = ref('all')        // 'all' | 'a_share' | 'us_stock' | 'hk_stock' | 'fund'
@@ -255,10 +295,75 @@ async function crawl(m = 'all') {
   try {
     const r = await apiAdminCrawl(m)
     const label = m === 'all' ? '全部市场' : marketMap[m]?.label || m
-    ElMessage.success(`${label} 爬取完成：新增 ${r.new_pending || 0} 条`)
+    const extra = r.message ? `（${r.message}）` : ''
+    ElMessage.success(`${label} 爬取完成：新增 ${r.new_pending || 0} 条${extra}`)
     load()
   } catch (e) { /* toast 已统一 */ } finally { crawling.value = false }
 }
+
+// 可爬市场（债券无爬虫数据源）
+const crawlMarkets = MARKETS.filter(m => m.value !== 'bond')
+
+// ── 指定证券爬取 ──
+const oneDlg = ref(false)
+const oneMarket = ref('')
+const oneCode = ref('')
+const secOptions = ref([])
+const secLoading = ref(false)
+
+async function loadSecOptions() {
+  if (!oneMarket.value) { secOptions.value = []; return }
+  secLoading.value = true
+  try {
+    const d = await apiAdminSecurities({ market: oneMarket.value, page_size: 200 })
+    secOptions.value = d.items || []
+  } finally { secLoading.value = false }
+}
+
+function onCrawlCmd(cmd) {
+  if (cmd === 'one') {
+    oneDlg.value = true
+    if (!secOptions.value.length) loadSecOptions()
+  } else if (cmd === 'logs') {
+    openLogDlg()
+  } else {
+    crawl(cmd)
+  }
+}
+
+async function crawlOne() {
+  crawling.value = true
+  try {
+    const r = await apiAdminCrawl(oneMarket.value, oneCode.value)
+    if (r.message && !r.new_pending) ElMessage.warning(r.message)
+    else ElMessage.success(`${oneCode.value} 爬取完成：新增 ${r.new_pending || 0} 条`)
+    oneDlg.value = false
+    load()
+  } catch (e) { /* toast 已统一 */ } finally { crawling.value = false }
+}
+
+// ── 爬取日志（轮询后端内存缓冲） ──
+const logDlg = ref(false)
+const logStatus = ref({ running: false, logs: [], started_at: null, finished_at: null, result: null })
+const logBox = ref(null)
+let logTimer = null
+
+async function pollLog() {
+  try {
+    logStatus.value = await apiCrawlStatus()
+    nextTick(() => { if (logBox.value) logBox.value.scrollTop = logBox.value.scrollHeight })
+  } catch (e) { /* toast 已统一 */ }
+}
+
+function openLogDlg() {
+  logDlg.value = true
+  pollLog()
+  stopLogPoll()
+  logTimer = setInterval(pollLog, 1500)
+}
+
+function stopLogPoll() { if (logTimer) { clearInterval(logTimer); logTimer = null } }
+onBeforeUnmount(stopLogPoll)
 
 async function createSchedule() {
   if (!form.code || !form.name) return ElMessage.warning('请填写代码和名称')
@@ -386,4 +491,17 @@ onMounted(load)
 .text-emerald { color: #059669; }
 .text-amber { color: #d97706; }
 .conf-rule { font-size: 12px; color: #94a3b8; margin-top: 12px; }
+
+/* 爬取日志弹窗 */
+.log-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.log-time { font-size: 12px; }
+.log-box {
+  max-height: 380px; overflow-y: auto; background: #0f172a;
+  border-radius: 8px; padding: 12px 14px;
+}
+.log-line {
+  font-family: Consolas, Monaco, monospace; font-size: 12px; line-height: 1.7;
+  color: #a5f3fc; white-space: pre-wrap; word-break: break-all;
+}
+.log-empty { padding: 24px; text-align: center; font-size: 12px; color: #64748b; }
 </style>

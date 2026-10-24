@@ -9,10 +9,6 @@
       "style": { "navigationBarTitleText": "我的持仓", "enablePullDownRefresh": true }
     },
     {
-      "path": "pages/record/record",
-      "style": { "navigationBarTitleText": "记分红" }
-    },
-    {
       "path": "pages/calendar/calendar",
       "style": { "navigationBarTitleText": "分红日历", "enablePullDownRefresh": true }
     },
@@ -54,7 +50,6 @@
     "list": [
       { "pagePath": "pages/index/index", "text": "总览" },
       { "pagePath": "pages/holdings/holdings", "text": "持仓" },
-      { "pagePath": "pages/record/record", "text": "记分红" },
       { "pagePath": "pages/calendar/calendar", "text": "日历" },
       { "pagePath": "pages/mine/mine", "text": "我的" }
     ]

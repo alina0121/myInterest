@@ -117,7 +117,9 @@ async function onWxLogin() {
     const data = await apiWxLogin(loginRes.code, nickname, avatar)
     setAuth(data.access_token, data.user)
     uni.showToast({ title: data.is_new_user ? '登录成功' : '欢迎回来', icon: 'success' })
-    setTimeout(() => uni.reLaunch({ url: '/pages/index/index' }), 400)
+    // 微信新用户引导绑定邮箱（对齐 eatWhat redirect=bind）
+    const url = data.is_new_user ? '/pages/mine/mine?bind=1' : '/pages/index/index'
+    setTimeout(() => uni.reLaunch({ url }), 400)
   } catch (e) {
     // 错误 toast 已由 request 统一处理
   } finally {

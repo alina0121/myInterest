@@ -41,11 +41,26 @@ def _reset_rate_limit():
 
 
 def register(client: TestClient, username: str, password: str = "password123") -> str:
-    resp = client.post("/api/auth/register", json={
-        "username": username, "email": f"{username}@test.com", "password": password})
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["code"] == 0
-    return resp.json()["data"]["access_token"]
+    """DB 直建用户并返回 access token。
+
+    密码登录体系已下线（/api/auth/login、/register 已删），测试不再走接口注册。
+    password 参数仅为兼容既有调用签名保留，实际存随机 hash（与 wx-login 建号一致）。
+    """
+    import secrets as _secrets
+
+    from app.database import engine
+    from app.models import User, UserSetting
+    from app.utils.security import create_access_token, hash_password
+    from sqlmodel import Session
+    with Session(engine) as s:
+        user = User(username=username, email=f"{username}@test.com",
+                    password_hash=hash_password(_secrets.token_urlsafe(16)),
+                    nickname=username)
+        s.add(user)
+        s.flush()
+        s.add(UserSetting(user_id=user.id))
+        s.commit()
+        return create_access_token(user.id)
 
 
 def auth(token: str) -> dict:

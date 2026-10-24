@@ -41,7 +41,6 @@
             <el-button link type="primary" @click="viewData(row)">查看数据</el-button>
             <el-button v-if="row.status === 'active' && row.role === 'user'" link type="danger" @click="ban(row)">封禁</el-button>
             <el-button v-if="row.status === 'banned'" link type="success" @click="unban(row)">解封</el-button>
-            <el-button link type="warning" @click="resetPwd(row)">重置密码</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -74,7 +73,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { apiAdminUsers, apiAdminUserData, apiAdminBanUser, apiAdminUnbanUser, apiAdminResetPwd } from '../../api'
+import { apiAdminUsers, apiAdminUserData, apiAdminBanUser, apiAdminUnbanUser } from '../../api'
 import { marketMap, fmtCNY } from '../../utils/constants'
 
 const list = ref([])
@@ -124,15 +123,6 @@ async function unban(row) {
   try {
     await apiAdminUnbanUser(row.id)
     ElMessage.success('已解封')
-    load()
-  } catch (e) { /* toast 已统一 */ }
-}
-
-async function resetPwd(row) {
-  try {
-    const r = await apiAdminResetPwd(row.id)
-    const pwd = r?.new_password || r?.password || '已重置'
-    ElMessageBox.alert(`新密码：<b>${pwd}</b>`, '密码已重置', { dangerouslyUseHTMLString: true })
     load()
   } catch (e) { /* toast 已统一 */ }
 }

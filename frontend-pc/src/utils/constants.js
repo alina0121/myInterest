@@ -4,6 +4,7 @@ export const MARKETS = [
   { value: 'us_stock', label: '美股', color: '#2563eb' },
   { value: 'hk_stock', label: '港股', color: '#059669' },
   { value: 'fund', label: '基金', color: '#d97706' },
+  { value: 'bond', label: '债券', color: '#7c3aed' },
 ]
 
 export const marketMap = Object.fromEntries(MARKETS.map((m) => [m.value, m]))
